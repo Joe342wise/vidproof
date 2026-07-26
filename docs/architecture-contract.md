@@ -10,7 +10,7 @@ The prototype uses 10-second signed segments. This creates about 360 Fabric tran
 
 ## Encryption
 
-Video segments are encrypted with AES-256-GCM using a fresh per-segment key. The per-segment key is wrapped with the registered owner or investigator public key.
+Video segments are encrypted with AES-256-GCM using a fresh per-segment key. The per-segment key is wrapped with the registered owner or investigator public key. Evidence metadata must store both the AES-GCM nonce and authentication tag.
 
 The encrypted file hash is the main long-term storage-integrity check. Plaintext hashes are capture-time validation records and must be interpreted only against the exact capture bytes that entered encryption.
 
@@ -27,3 +27,9 @@ Plaintext exists on the Pi before encryption because capture requires it. Export
 ## Storage Split
 
 Application evidence storage contains encrypted video files and application metadata. Fabric CouchDB is internal to Hyperledger Fabric and must not store raw evidence files.
+
+## Runtime Stack
+
+Python owns the main system: Raspberry Pi/file-mode capture, enrollment, FastAPI backend, forensic utilities, RFC 3161 subprocess calls, Streamlit dashboard, and PRNU evaluation.
+
+Go owns the Fabric slice: a thin HTTP Fabric adapter using the official Fabric Gateway Go client and Go chaincode running in the Fabric test network.

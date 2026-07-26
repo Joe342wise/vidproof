@@ -16,3 +16,5 @@ crypto/private/
 *.crt
 *.tsr
 *.tsq
+bin/
+coverage.out

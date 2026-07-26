@@ -1,6 +1,10 @@
-# Draft Schemas
+# Local Schema Contract
 
-## Camera Asset
+These schemas are stable for the first file-mode capture-and-verify milestone. `camera.json` and `evidence.json` are write-once records. `verification-result.json` is produced each time a verifier checks an evidence item, so one evidence item can have many verification results over its lifetime.
+
+## camera.json
+
+Created during enrollment. The public key becomes the camera identity used for primary source-authentication verification.
 
 ```json
 {
@@ -15,7 +19,9 @@
 }
 ```
 
-## Evidence Asset
+## evidence.json
+
+Created once during capture. This record describes the exact bytes that were signed and encrypted. Do not mutate this file during verification or export; write a new `verification-result.json` instead.
 
 ```json
 {
@@ -26,6 +32,7 @@
   "plaintextHash": "sha256-hex",
   "encryptionAlgo": "AES-256-GCM",
   "nonce": "base64",
+  "authTag": "base64",
   "wrappedKey": "base64",
   "captureTimestamp": "RFC3339",
   "deviceSignature": "base64",
@@ -35,7 +42,32 @@
 }
 ```
 
-## Custody Record
+`plaintextHash` is the SHA-256 hash of the exact byte stream passed into signing and encryption. `encryptedFileHash` is the long-term integrity check for the stored encrypted evidence file. AES-256-GCM requires both `nonce` and `authTag` to decrypt and authenticate the ciphertext.
+
+## verification-result.json
+
+Produced by each verification run. This is append-only audit output and maps directly to a future `LogVerification` Fabric transaction.
+
+```json
+{
+  "verificationId": "ver-001",
+  "evidenceId": "ev-001",
+  "verifiedAt": "RFC3339",
+  "verifierId": "string",
+  "encryptedFileHashValid": true,
+  "deviceSignatureValid": true,
+  "decryptionAttempted": true,
+  "decryptionValid": true,
+  "decryptedPlaintextHash": "sha256-hex",
+  "plaintextHashMatchesEvidence": true,
+  "prnuChecked": false,
+  "prnuScore": null,
+  "primaryDecision": "PASS|FAIL",
+  "notes": "string"
+}
+```
+
+## custody-record.json
 
 ```json
 {

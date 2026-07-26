@@ -1,6 +1,6 @@
 # Python CLI Contract
 
-Node invokes Python tools through subprocess calls. Each command writes one JSON object to stdout. Non-zero exits must still write a JSON error object when possible.
+The Python FastAPI backend may invoke local forensic tools through subprocess calls when a utility is better isolated as a CLI. Each command writes one JSON object to stdout. Non-zero exits must still write a JSON error object when possible.
 
 ## Success Shape
 

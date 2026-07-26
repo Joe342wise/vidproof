@@ -1,4 +1,6 @@
-# Hyperledger Fabric Chaincode
+# Go Hyperledger Fabric Chaincode
+
+Use Go for VidProof chaincode so the Fabric adapter and smart contract share one Fabric-specific language.
 
 Planned smart contract functions:
 

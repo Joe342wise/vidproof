@@ -22,7 +22,8 @@ The architecture uses cryptographic device signing as the primary source-authent
 - `docs/architecture-contract.md` - high-level technical contract and stack split.
 - `docs/schemas.md` - stable local JSON schema contract.
 - `docs/algorithms-and-processes.md` - step-by-step algorithms and workflows for the full system.
-- `docs/development-plan.md` - milestone-by-milestone build plan and acceptance criteria.
+- `docs/software-development-plan.md` - software build plan and acceptance criteria.
+- `docs/hardware-development-plan.md` - hardware build plan and acceptance criteria.
 - `docs/python-cli-contract.md` - JSON contract for local Python CLI utilities.
 
 ## Authentication Claim

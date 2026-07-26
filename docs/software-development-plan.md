@@ -1,6 +1,6 @@
-# Development Plan
+# Software Development Plan
 
-This plan describes the practical build sequence for VidProof. The goal is to prove the security-critical workflow first, then add backend orchestration, dashboard support, Fabric logging, timestamping, Pi capture, and PRNU evaluation.
+This plan covers VidProof's software implementation: schemas, file-mode enrollment, signing, encryption, verification, FastAPI backend, Streamlit dashboard, Go Fabric adapter, Go chaincode, RFC 3161 timestamping, forensic export, and attack testing.
 
 ## Guiding Principles
 
@@ -12,101 +12,25 @@ This plan describes the practical build sequence for VidProof. The goal is to pr
 - Keep Python responsible for evidence workflow and forensic logic.
 - Keep Go responsible only for Fabric adapter and chaincode.
 - Do not store raw or decrypted video in Fabric or metadata storage.
+- Treat the video source as swappable input: file-mode and Pi-mode both feed bytes into the same security pipeline.
 
-## Team Responsibilities
+## Shared Contracts
 
-| Role | Primary Responsibility |
-|---|---|
-| Software Dev A | Python security path: enrollment, signing, encryption, verification, export workflow |
-| Software Dev B | FastAPI backend, Streamlit dashboard, Go Fabric adapter, Go chaincode |
-| IoT Developer | Raspberry Pi capture, camera setup, system service, real footage collection, PRNU test data |
+The software track must preserve these contracts for hardware integration:
 
-The responsibilities can overlap, but each module should have one clear owner during implementation.
+- `camera.json` identifies an enrolled camera and its public key.
+- `evidence.json` is the immutable capture-time evidence record.
+- `verification-result.json` records each verification run separately.
+- `custody-record.json` represents actions that will later map to Fabric custody events.
+- File-mode and Pi-mode must both produce the same kind of video byte input for signing and encryption.
+- The dashboard must not handle private keys directly.
+- PRNU results must be labeled secondary and must not replace signature verification.
 
-## Parallel Work Plan
-
-The three developers can work in parallel after the schema and interface contracts are agreed. Milestones 1 to 3 are the main dependency chain; other setup work can happen beside them.
-
-### Shared Start: Contract Freeze
-
-Before major implementation, all developers should agree on:
-
-- `camera.json`.
-- `evidence.json`.
-- `verification-result.json`.
-- `custody-record.json`.
-- Folder layout for keys, metadata, evidence, exports, and sample videos.
-- FastAPI request/response shapes for enrollment, capture, verification, and evidence listing.
-- Go Fabric adapter endpoint names and JSON request/response shapes.
-
-This shared start prevents each developer from building incompatible inputs and outputs.
-
-### Sprint 1: Foundations
-
-| Developer | Work |
-|---|---|
-| Software Dev A | Freeze schemas, implement file-mode enrollment, generate Ed25519 camera keys, create `camera.json` |
-| Software Dev B | Build FastAPI skeleton, Streamlit skeleton, Go Fabric adapter health endpoint, Go chaincode struct placeholders |
-| IoT Developer | Set up Raspberry Pi, verify camera module, capture sample 10-second clips, document camera settings |
-
-### Sprint 1 Dependencies
-
-- Dev A owns the schema contract with input from Dev B and the IoT Developer.
-- Dev B can build placeholder API/dashboard screens before the crypto workflow is complete.
-- IoT Developer can collect footage immediately because file-mode and Pi-mode both produce video bytes.
-
-### Sprint 2: Local Proof Of Architecture
-
-| Developer | Work |
-|---|---|
-| Software Dev A | Implement file-mode capture-and-verify round trip: hash, sign, AES-256-GCM encrypt, verify, decrypt, write `verification-result.json` |
-| Software Dev B | Wrap Dev A's scripts/workflow in FastAPI endpoints, add dashboard evidence list and verification status views |
-| IoT Developer | Implement Pi `get_video_segment()` function and make its output match file-mode input expectations |
-
-### Sprint 2 Dependencies
-
-- Dev B should not finalize API responses until Dev A's `evidence.json` and `verification-result.json` outputs are stable.
-- IoT work should focus only on producing compatible 10-second video segments, not duplicating crypto logic.
-
-### Sprint 3: Ledger And Export Integration
-
-| Developer | Work |
-|---|---|
-| Software Dev A | Implement forensic export package and verification instructions |
-| Software Dev B | Implement Go chaincode, Fabric test network, Go adapter endpoints, Python-to-Go integration |
-| IoT Developer | Integrate real Pi-mode capture with backend upload and collect PRNU reference/test footage |
-
-### Sprint 3 Dependencies
-
-- Fabric integration should begin only after local evidence records verify correctly.
-- Export package generation should use existing `evidence.json` and `verification-result.json` records, not define new record shapes.
-
-### Sprint 4: Evaluation And Presentation Readiness
-
-| Developer | Work |
-|---|---|
-| Software Dev A | Build attack test scripts and export verification tests |
-| Software Dev B | Add Fabric history display, timestamp status display, dashboard polish |
-| IoT Developer | Run PRNU evaluation under actual Pi compression settings and document same-camera/different-camera scores |
-
-### Sprint 4 Dependencies
-
-- PRNU results must remain secondary and should not block primary signature verification.
-- Dashboard should clearly separate hash validation, signature validation, timestamp validation, Fabric history, and PRNU score.
-
-### Work That Should Not Start Too Early
-
-- Do not build full Fabric integration before local file-mode evidence verifies correctly.
-- Do not finalize forensic export before `verification-result.json` is stable.
-- Do not make PRNU a pass/fail gate.
-- Do not build Pi-specific crypto code that differs from file-mode crypto code.
-- Do not make dashboard screens handle private keys directly.
-
-## Milestone 0: Repository And Environment Setup
+## Phase 0: Environment Setup
 
 ### Goal
 
-Make the project runnable on a development machine.
+Make the software project runnable on a development machine.
 
 ### Tasks
 
@@ -131,11 +55,11 @@ Make the project runnable on a development machine.
 - Backend health endpoint can start locally.
 - Dashboard can start locally.
 
-## Milestone 1: Stable Local Schemas
+## Phase 1: Stable Local Schemas
 
 ### Goal
 
-Freeze the local JSON formats before writing capture and verification code.
+Freeze local JSON formats before writing capture and verification code.
 
 ### Tasks
 
@@ -157,7 +81,7 @@ Freeze the local JSON formats before writing capture and verification code.
 - Verification code can write `verification-result.json` without schema changes.
 - AES-GCM `nonce` and `authTag` fields are present.
 
-## Milestone 2: File-Mode Enrollment
+## Phase 2: File-Mode Enrollment
 
 ### Goal
 
@@ -185,7 +109,7 @@ Create the root camera identity without needing Raspberry Pi hardware.
 - Private key is not written into `camera.json`.
 - Public key can be used by the verifier.
 
-## Milestone 3: File-Mode Capture And Verify Round Trip
+## Phase 3: File-Mode Capture And Verify Round Trip
 
 ### Goal
 
@@ -228,7 +152,7 @@ Build the smallest complete proof that the architecture works.
 - Modified auth tag causes AES-GCM authentication failure.
 - Verification does not mutate `evidence.json`.
 
-## Milestone 4: Python FastAPI Backend
+## Phase 4: Python FastAPI Backend
 
 ### Goal
 
@@ -256,7 +180,7 @@ Expose the working local workflow through API endpoints.
 - Backend can trigger verification.
 - Backend returns structured JSON errors.
 
-## Milestone 5: Streamlit Dashboard
+## Phase 5: Streamlit Dashboard
 
 ### Goal
 
@@ -284,7 +208,7 @@ Provide a simple operator/investigator interface for demos and testing.
 - User can run verification from dashboard.
 - User can see pass/fail status and reason.
 
-## Milestone 6: Go Chaincode
+## Phase 6: Go Chaincode
 
 ### Goal
 
@@ -314,7 +238,7 @@ Implement Fabric smart contract records for cameras, evidence, and custody event
 - Registering evidence stores hashes/signatures, not raw video.
 - Verification logs are append-only events.
 
-## Milestone 7: Fabric Test Network And Go Adapter
+## Phase 7: Fabric Test Network And Go Adapter
 
 ### Goal
 
@@ -346,7 +270,7 @@ Connect the Python backend to Fabric through the Go adapter.
 - Verification result creates a Fabric transaction.
 - Evidence history can be queried through the backend.
 
-## Milestone 8: RFC 3161 Timestamping
+## Phase 8: RFC 3161 Timestamping
 
 ### Goal
 
@@ -373,7 +297,7 @@ Add independently verifiable timestamp proofs.
 - Timestamp token hash is stored in metadata/Fabric.
 - Invalid or missing token is reported clearly.
 
-## Milestone 9: Forensic Export Package
+## Phase 9: Forensic Export Package
 
 ### Goal
 
@@ -406,64 +330,7 @@ Generate a package that a third party can independently verify.
 - Export process does not require decrypted video by default.
 - Temporary plaintext is deleted when decryption is used.
 
-## Milestone 10: Raspberry Pi Capture Mode
-
-### Goal
-
-Replace file input with real camera input while keeping the cryptographic pipeline unchanged.
-
-### Tasks
-
-1. Set up Raspberry Pi OS and camera module.
-2. Install Python dependencies on Pi.
-3. Implement `get_video_segment()` using `picamera2` or selected capture tool.
-4. Capture 10-second segments.
-5. Feed captured bytes into the existing signing/encryption pipeline.
-6. Upload encrypted evidence and metadata to backend.
-7. Add systemd service for continuous capture if needed.
-
-### Deliverables
-
-- Pi-mode capture command/service.
-- Real encrypted evidence from camera.
-
-### Acceptance Criteria
-
-- Pi captures valid 10-second segments.
-- Pi-generated evidence verifies through the same verifier as file-mode evidence.
-- Capture source is the only meaningful difference between file mode and Pi mode.
-
-## Milestone 11: PRNU Secondary Evaluation
-
-### Goal
-
-Measure camera-sensor consistency under actual project conditions.
-
-### Tasks
-
-1. Capture reference clips from enrolled camera.
-2. Capture test clips from same camera.
-3. Capture test clips from different camera if available.
-4. Extract PRNU reference fingerprint.
-5. Compute same-camera correlation scores.
-6. Compute different-camera correlation scores.
-7. Compare scores under actual compression settings.
-8. Add PRNU results to verification output as secondary evidence.
-9. Document limitations.
-
-### Deliverables
-
-- PRNU comparison script.
-- PRNU score table.
-- PRNU evaluation section for report.
-
-### Acceptance Criteria
-
-- PRNU results are measured, not assumed.
-- PRNU is not used as the primary pass/fail gate.
-- Report clearly states compression and sensor limitations.
-
-## Milestone 12: Attack Scenario Testing
+## Phase 10: Attack Scenario Testing
 
 ### Goal
 
@@ -495,42 +362,23 @@ Demonstrate that the prototype detects expected failures.
 - Failures are reported clearly by backend/dashboard.
 - Results can be included in Chapter 4.
 
-## Milestone 13: Report And Presentation Preparation
+## Software Build Order
 
-### Goal
+1. Stable local schemas.
+2. File-mode enrollment.
+3. File-mode capture-and-verify round trip.
+4. Python FastAPI backend.
+5. Streamlit dashboard.
+6. Go chaincode.
+7. Fabric test network and Go adapter.
+8. RFC 3161 timestamping.
+9. Forensic export package.
+10. Attack scenario testing.
 
-Ensure the implementation and report tell the same story.
-
-### Tasks
-
-1. Update report technology stack from Node/React to Python/FastAPI/Streamlit/Go.
-2. Explain device signing as primary authentication.
-3. Explain PRNU as secondary forensic signal.
-4. Explain why evidence verification does not require decryption.
-5. Explain 10-second segment transaction volume limitation.
-6. Include screenshots of dashboard and verification results.
-7. Include attack test results.
-8. Include limitations and future work.
-
-### Deliverables
-
-- Updated methodology chapter.
-- Updated system architecture diagram.
-- Evaluation results.
-- Presentation demo script.
-
-### Acceptance Criteria
-
-- Report no longer contradicts implementation.
-- Examiner-facing claims are precise and defensible.
-- Demo can show enrollment, capture, verification, and failure detection.
-
-## Recommended Immediate Work
-
-Start with Milestones 1 to 3:
+## Immediate Software Priority
 
 1. Freeze schemas.
 2. Implement file-mode enrollment.
 3. Implement file-mode capture-and-verify round trip.
 
-Do not start Fabric, TSA, PRNU, or Pi integration until the local cryptographic round trip works reliably.
+Do not start Fabric, TSA, PRNU, or full Pi integration until the local cryptographic round trip works reliably.

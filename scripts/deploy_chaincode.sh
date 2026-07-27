@@ -38,8 +38,15 @@ log() { echo "==> $*"; }
 # ---------------------------------------------------------------------------
 # Vendor dependencies (required by Fabric Go builder)
 # ---------------------------------------------------------------------------
-log "Vendoring chaincode dependencies..."
-(cd "$CHAINCODE_DIR" && go mod tidy && go mod vendor)
+if [[ -d "$CHAINCODE_DIR/vendor" ]]; then
+    log "chaincode/vendor/ already present — skipping go mod vendor."
+elif command -v go >/dev/null 2>&1; then
+    log "Vendoring chaincode dependencies..."
+    (cd "$CHAINCODE_DIR" && go mod tidy && go mod vendor)
+else
+    echo "ERROR: chaincode/vendor/ missing and 'go' not found. Run 'go mod vendor' locally and rsync again." >&2
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Package

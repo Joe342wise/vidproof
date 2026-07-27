@@ -33,11 +33,6 @@ from pathlib import Path
 import requests
 
 
-def fail(code: str, message: str) -> None:
-    print(json.dumps({"ok": False, "error": {"code": code, "message": message}}))
-    raise SystemExit(1)
-
-
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -57,42 +52,38 @@ def _try_get_fabric_history(adapter_url: str, evidence_id: str) -> list | None:
     return None
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Build a forensic export package")
-    parser.add_argument("--evidence-id", required=True)
-    parser.add_argument("--out-dir", required=True, help="Output directory for the zip archive")
-    parser.add_argument("--storage-dir", default="storage")
-    parser.add_argument("--tsa-url", default=None, help="TSA URL (skip if not provided)")
-    parser.add_argument("--fabric-adapter-url", default="http://localhost:8081")
-    args = parser.parse_args()
+def build_package(
+    evidence_id: str,
+    out_dir: Path,
+    storage_dir: Path = Path("storage"),
+    fabric_adapter_url: str = "http://localhost:8081",
+) -> dict:
+    """Build a forensic zip package.
 
-    eid = args.evidence_id
-    storage = Path(args.storage_dir)
-    out_dir = Path(args.out_dir)
+    Returns a result dict on success. Raises ValueError on failure.
+    """
+    eid = evidence_id
+    storage = storage_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # -----------------------------------------------------------------------
-    # Collect required files
-    # -----------------------------------------------------------------------
     enc_path = storage / "evidence" / f"{eid}.enc"
     evidence_path = storage / "metadata" / "evidence" / f"{eid}.json"
 
     if not enc_path.exists():
-        fail("ENC_NOT_FOUND", f"Encrypted evidence file not found: {enc_path}")
+        raise ValueError(f"ENC_NOT_FOUND: Encrypted evidence file not found: {enc_path}")
     if not evidence_path.exists():
-        fail("EVIDENCE_NOT_FOUND", f"Evidence record not found: {evidence_path}")
+        raise ValueError(f"EVIDENCE_NOT_FOUND: Evidence record not found: {evidence_path}")
 
     try:
         evidence = json.loads(evidence_path.read_text())
     except (json.JSONDecodeError, OSError) as exc:
-        fail("EVIDENCE_READ_ERROR", str(exc))
+        raise ValueError(f"EVIDENCE_READ_ERROR: {exc}")
 
     camera_id = evidence.get("cameraId", "")
     camera_path = storage / "metadata" / "cameras" / f"{camera_id}.json"
     if not camera_path.exists():
-        fail("CAMERA_NOT_FOUND", f"Camera record not found: {camera_path}")
+        raise ValueError(f"CAMERA_NOT_FOUND: Camera record not found: {camera_path}")
 
-    # All verification results for this evidence item
     results_dir = storage / "metadata" / "results"
     ver_records: list[tuple[str, bytes]] = []
     if results_dir.exists():
@@ -104,24 +95,18 @@ def main() -> int:
             except (json.JSONDecodeError, OSError):
                 continue
 
-    # TSA token (optional)
     tsr_path = storage / "tsa" / f"{eid}.tsr"
     tsr_bytes: bytes | None = tsr_path.read_bytes() if tsr_path.exists() else None
 
-    # Fabric history (best-effort)
-    fabric_history = _try_get_fabric_history(args.fabric_adapter_url, eid)
+    fabric_history = _try_get_fabric_history(fabric_adapter_url, eid)
 
-    # -----------------------------------------------------------------------
-    # Build archive
-    # -----------------------------------------------------------------------
     zip_path = out_dir / f"{eid}.zip"
-    manifest: dict[str, str] = {}  # archive_path → sha256
+    manifest: dict[str, str] = {}
 
     enc_bytes = enc_path.read_bytes()
     evidence_bytes = evidence_path.read_bytes()
     camera_bytes = camera_path.read_bytes()
 
-    # Build VERIFY_INSTRUCTIONS content before opening zip
     verify_instructions = _build_verify_instructions(
         eid=eid,
         evidence=evidence,
@@ -149,7 +134,6 @@ def main() -> int:
 
         add("VERIFY_INSTRUCTIONS.md", verify_instructions.encode())
 
-        # Write MANIFEST last (after all other entries are hashed)
         manifest_payload = {
             "evidenceId": eid,
             "exportedAt": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -162,17 +146,39 @@ def main() -> int:
 
     manifest_hash = sha256_bytes(zip_path.read_bytes())
 
-    print(json.dumps({
-        "ok": True,
-        "result": {
-            "packagePath": str(zip_path),
-            "manifestHash": manifest_hash,
-            "filesIncluded": len(manifest) + 1,  # +1 for MANIFEST.json itself
-            "tsaTokenIncluded": tsr_bytes is not None,
-            "fabricHistoryIncluded": fabric_history is not None,
-            "verificationResultsIncluded": len(ver_records),
-        },
-    }))
+    return {
+        "packagePath": str(zip_path),
+        "manifestHash": manifest_hash,
+        "filesIncluded": len(manifest) + 1,
+        "tsaTokenIncluded": tsr_bytes is not None,
+        "fabricHistoryIncluded": fabric_history is not None,
+        "verificationResultsIncluded": len(ver_records),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Build a forensic export package")
+    parser.add_argument("--evidence-id", required=True)
+    parser.add_argument("--out-dir", required=True, help="Output directory for the zip archive")
+    parser.add_argument("--storage-dir", default="storage")
+    parser.add_argument("--tsa-url", default=None, help="TSA URL (currently unused; token read from storage)")
+    parser.add_argument("--fabric-adapter-url", default="http://localhost:8081")
+    args = parser.parse_args()
+
+    try:
+        result = build_package(
+            evidence_id=args.evidence_id,
+            out_dir=Path(args.out_dir),
+            storage_dir=Path(args.storage_dir),
+            fabric_adapter_url=args.fabric_adapter_url,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        code, _, message = msg.partition(": ")
+        print(json.dumps({"ok": False, "error": {"code": code, "message": message or msg}}))
+        return 1
+
+    print(json.dumps({"ok": True, "result": result}))
     return 0
 
 

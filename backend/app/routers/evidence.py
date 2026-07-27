@@ -1,7 +1,9 @@
 import os
+import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response as RawResponse
 
 from backend.app.config import settings
 from backend.app.models import (
@@ -12,6 +14,7 @@ from backend.app.models import (
     VerifyEvidenceResponse,
 )
 from backend.app.services import capture as capture_svc
+from backend.app.services import fabric_client
 from backend.app.services import verification as verification_svc
 
 router = APIRouter(prefix="/evidence", tags=["evidence"])
@@ -76,3 +79,32 @@ def verify_evidence(evidence_id: str, req: VerifyEvidenceRequest):
 @router.get("/{evidence_id}/verification-results", response_model=list[VerificationResult])
 def list_verification_results(evidence_id: str):
     return verification_svc.list_verification_results(evidence_id)
+
+
+@router.get("/{evidence_id}/fabric-history")
+def get_fabric_history(evidence_id: str):
+    history = fabric_client.get_evidence_history(evidence_id)
+    return {"ok": True, "history": history or [], "available": history is not None}
+
+
+@router.post("/{evidence_id}/export")
+def export_evidence_package(evidence_id: str):
+    from forensics.export_package import build_package
+
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            result = build_package(
+                evidence_id=evidence_id,
+                out_dir=Path(tmp),
+                storage_dir=settings.storage_dir,
+                fabric_adapter_url=settings.fabric_adapter_url,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        zip_bytes = Path(result["packagePath"]).read_bytes()
+
+    return RawResponse(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{evidence_id}.zip"'},
+    )

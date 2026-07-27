@@ -78,3 +78,15 @@ def list_verification_results(evidence_id: str) -> list[dict]:
     resp = _session.get(_url(f"/evidence/{evidence_id}/verification-results"), timeout=10)
     resp.raise_for_status()
     return resp.json()
+
+
+def get_fabric_history(evidence_id: str) -> dict:
+    resp = _session.get(_url(f"/evidence/{evidence_id}/fabric-history"), timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def export_evidence(evidence_id: str) -> bytes:
+    resp = _session.post(_url(f"/evidence/{evidence_id}/export"), timeout=60)
+    resp.raise_for_status()
+    return resp.content

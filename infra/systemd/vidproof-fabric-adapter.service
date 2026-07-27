@@ -1,0 +1,19 @@
+[Unit]
+Description=VidProof — Fabric adapter (Go HTTP service)
+After=network.target vidproof-fabric.service
+Wants=vidproof-fabric.service
+
+[Service]
+Type=simple
+User=bernard
+Group=bernard
+WorkingDirectory=/home/bernard/Projects/vidproof
+EnvironmentFile=/home/bernard/Projects/vidproof/infra/systemd/fabric-adapter.env
+ExecStart=/home/bernard/Projects/vidproof/bin/fabric-adapter
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=VidProof — FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+User=bernard
+Group=bernard
+WorkingDirectory=/home/bernard/Projects/vidproof
+Environment=PATH=/home/bernard/.local/share/mise/shims:/home/bernard/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

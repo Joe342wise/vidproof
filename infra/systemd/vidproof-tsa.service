@@ -1,0 +1,18 @@
+[Unit]
+Description=VidProof — RFC 3161 TSA server
+After=network.target
+
+[Service]
+Type=simple
+User=bernard
+Group=bernard
+WorkingDirectory=/home/bernard/Projects/vidproof
+Environment=PATH=/home/bernard/.local/share/mise/shims:/home/bernard/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/bernard/Projects/vidproof/scripts/start_tsa.sh 2560
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

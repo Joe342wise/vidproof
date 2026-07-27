@@ -1,0 +1,16 @@
+{
+  "evidenceId": "ev-a1b2c3d4",
+  "cameraId": "cam-001",
+  "objectUri": "storage/evidence/ev-a1b2c3d4.enc",
+  "encryptedFileHash": "b94f6f125179a9594f03a20ecb4d7b25c5f7d2e1a3c9b8e7f6d5c4b3a2e1f0d9",
+  "plaintextHash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+  "encryptionAlgo": "AES-256-GCM",
+  "nonce": "YWJjZGVmZ2hpamts",
+  "authTag": "dGVzdGF1dGh0YWdoZXJl",
+  "wrappedKey": "ZXBoZW1lcmFscHVia2V5Ynl0ZXMzMmJ5dGVzd3JhcHBlZGtleWJ5dGVzNDBieXRlc3RvdGFsNzI=",
+  "captureTimestamp": "2026-01-15T10:30:00Z",
+  "deviceSignature": "c2lnbmF0dXJlYnl0ZXM2NGJ5dGVzZW5jb2RlZGluYmFzZTY0Zm9yZWQ1NTE5c2lnbmF0dXJlZXhhbXBsZWhlcmU=",
+  "prnuCaptureScore": 0.0,
+  "tsaTokenRef": "",
+  "fabricTxId": ""
+}

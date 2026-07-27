@@ -1,0 +1,22 @@
+[Unit]
+Description=VidProof — Hyperledger Fabric test network
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=bernard
+Group=bernard
+WorkingDirectory=/home/bernard/Projects/vidproof
+Environment=PATH=/home/bernard/.local/share/mise/shims:/home/bernard/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=FABRIC_SAMPLES_DIR=/home/bernard/fabric-samples
+ExecStart=/home/bernard/Projects/vidproof/scripts/start_fabric_network.sh
+ExecStop=/home/bernard/Projects/vidproof/scripts/stop_fabric_network.sh
+TimeoutStartSec=300
+TimeoutStopSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

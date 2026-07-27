@@ -1,4 +1,6 @@
+import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -72,3 +74,65 @@ def get_evidence(evidence_id: str) -> dict | None:
         return json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return None
+
+
+_REQUIRED_EVIDENCE_FIELDS = {
+    "evidenceId", "cameraId", "encryptedFileHash", "plaintextHash",
+    "encryptionAlgo", "nonce", "authTag", "wrappedKey",
+    "captureTimestamp", "deviceSignature",
+}
+
+
+def ingest_device_evidence(evidence_json_str: str, enc_bytes: bytes) -> dict:
+    """Accept pre-signed, pre-encrypted evidence produced by an edge device.
+
+    Validates the evidence record, verifies the .enc file hash matches the
+    declared encryptedFileHash, writes both files to storage, and returns
+    the stored evidence record. Raises ValueError on validation failures.
+    """
+    try:
+        evidence = json.loads(evidence_json_str)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"evidence_json is not valid JSON: {exc}")
+
+    missing = _REQUIRED_EVIDENCE_FIELDS - evidence.keys()
+    if missing:
+        raise ValueError(f"evidence_json missing required fields: {sorted(missing)}")
+
+    eid = evidence["evidenceId"]
+    camera_id = evidence["cameraId"]
+
+    if not eid or not camera_id:
+        raise ValueError("evidenceId and cameraId must not be empty")
+
+    camera_path = settings.cameras_dir / f"{camera_id}.json"
+    if not camera_path.exists():
+        raise ValueError(f"Camera '{camera_id}' is not enrolled on this backend")
+
+    enc_path = settings.evidence_dir / f"{eid}.enc"
+    evidence_path = settings.evidence_meta_dir / f"{eid}.json"
+
+    if enc_path.exists() or evidence_path.exists():
+        raise ValueError(f"Evidence '{eid}' already exists — ingest is write-once")
+
+    actual_hash = hashlib.sha256(enc_bytes).hexdigest()
+    if actual_hash != evidence["encryptedFileHash"]:
+        raise ValueError(
+            f"encryptedFileHash mismatch: declared={evidence['encryptedFileHash']!r} "
+            f"actual={actual_hash!r}"
+        )
+
+    settings.evidence_dir.mkdir(parents=True, exist_ok=True)
+    settings.evidence_meta_dir.mkdir(parents=True, exist_ok=True)
+
+    enc_path.write_bytes(enc_bytes)
+
+    evidence.setdefault("objectUri", str(enc_path))
+    evidence.setdefault("prnuCaptureScore", 0.0)
+    evidence.setdefault("tsaTokenRef", "")
+    evidence.setdefault("fabricTxId", "")
+
+    evidence_path.write_text(json.dumps(evidence, indent=2))
+    os.chmod(evidence_path, 0o444)
+
+    return evidence

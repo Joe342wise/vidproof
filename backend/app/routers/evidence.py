@@ -9,6 +9,7 @@ from backend.app.config import settings
 from backend.app.models import (
     CaptureResponse,
     EvidenceRecord,
+    IngestResponse,
     VerificationResult,
     VerifyEvidenceRequest,
     VerifyEvidenceResponse,
@@ -52,6 +53,34 @@ async def capture_evidence(
         plaintextHash=record["plaintextHash"],
         encryptedFileHash=record["encryptedFileHash"],
         objectUri=record["objectUri"],
+    )
+
+
+@router.post("/ingest", response_model=IngestResponse, status_code=201)
+async def ingest_evidence(
+    evidence_json: str = Form(...),
+    enc_file: UploadFile = File(...),
+):
+    """Accept pre-signed, pre-encrypted evidence from an edge device (e.g. Raspberry Pi).
+
+    The edge device runs the full crypto pipeline locally — this endpoint only
+    validates, stores, and registers to Fabric. It never sees plaintext video.
+    """
+    enc_bytes = await enc_file.read()
+    try:
+        record = capture_svc.ingest_device_evidence(evidence_json, enc_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Storage error: {exc}")
+
+    fabric_tx = fabric_client.register_evidence(record["evidenceId"], record)
+
+    return IngestResponse(
+        ok=True,
+        evidenceId=record["evidenceId"],
+        encryptedFileHash=record["encryptedFileHash"],
+        fabricTxId=fabric_tx,
     )
 
 

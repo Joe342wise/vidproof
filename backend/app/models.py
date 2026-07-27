@@ -67,6 +67,13 @@ class CaptureResponse(BaseModel):
     objectUri: str
 
 
+class IngestResponse(BaseModel):
+    ok: bool
+    evidenceId: str
+    encryptedFileHash: str
+    fabricTxId: str | None
+
+
 # ---------------------------------------------------------------------------
 # Verification
 # ---------------------------------------------------------------------------

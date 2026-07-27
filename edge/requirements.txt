@@ -1,0 +1,3 @@
+cryptography>=42.0.0
+requests>=2.31.0
+# picamera2 is pre-installed on Raspberry Pi OS — do not pip install it on other platforms

@@ -1,0 +1,59 @@
+services:
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./storage:/app/storage
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      streamlit run dashboard/app.py
+        --server.port 8501
+        --server.address 0.0.0.0
+        --server.headless true
+    ports:
+      - "127.0.0.1:8501:8501"
+    environment:
+      - VIDPROOF_BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  tsa:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ./scripts/start_tsa.sh 2560
+    ports:
+      - "127.0.0.1:2560:2560"
+    volumes:
+      - ./infra/tsa:/app/infra/tsa
+    restart: unless-stopped
+
+  fabric-adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile.adapter
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      - FABRIC_CRYPTO_PATH=/fabric-crypto/peerOrganizations/org1.example.com
+      - FABRIC_PEER_ENDPOINT=host.docker.internal:7051
+      - FABRIC_GATEWAY_PEER=peer0.org1.example.com
+      - FABRIC_MSP_ID=Org1MSP
+      - FABRIC_CHANNEL=mychannel
+      - FABRIC_CHAINCODE=vidproof
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${FABRIC_SAMPLES_DIR:-/home/bernard/fabric-samples}/test-network/organizations:/fabric-crypto:ro
+    restart: unless-stopped

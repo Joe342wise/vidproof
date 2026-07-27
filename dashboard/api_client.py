@@ -1,6 +1,8 @@
+import os
+
 import requests
 
-BACKEND_URL = "http://localhost:8000"
+BACKEND_URL = os.environ.get("VIDPROOF_BACKEND_URL", "http://localhost:8000")
 _session = requests.Session()
 
 

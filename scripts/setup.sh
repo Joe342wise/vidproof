@@ -10,7 +10,7 @@
 #   3. Build and start all Docker Compose services
 #
 # After this completes:
-#   Backend  → http://localhost:8000
+#   Backend  → http://localhost:8010
 #   Dashboard→ http://localhost:8501  (or via SSH tunnel)
 #   TSA      → http://localhost:2560
 #   Adapter  → http://localhost:8081
@@ -65,13 +65,13 @@ echo "=========================================================="
 echo " VidProof deployment complete"
 echo "=========================================================="
 echo ""
-echo "  Backend API : http://localhost:8000/docs"
+echo "  Backend API : http://localhost:8010/docs"
 echo "  Dashboard   : http://localhost:8501"
 echo "  TSA server  : http://localhost:2560"
 echo "  Fabric adpt : http://localhost:8081/health"
 echo ""
 echo " SSH tunnel (run locally to access dashboard):"
-echo "   ssh -L 8501:127.0.0.1:8501 -L 8000:127.0.0.1:8000 personal_vps"
+echo "   ssh -L 8501:127.0.0.1:8501 -L 8010:127.0.0.1:8010 personal_vps"
 echo ""
 echo " Logs:  docker compose logs -f"
 echo " Owner pubkey: $(cat storage/keys/owner.x25519.pub.b64 2>/dev/null || echo '(not found)')"

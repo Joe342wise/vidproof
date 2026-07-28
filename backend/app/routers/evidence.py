@@ -1,5 +1,7 @@
+import json
 import os
 import tempfile
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,6 +10,7 @@ from fastapi.responses import Response as RawResponse
 
 from backend.app.config import settings
 from backend.app.models import (
+    BulkExportRequest,
     CaptureResponse,
     EvidenceRecord,
     IngestResponse,
@@ -82,6 +85,78 @@ async def ingest_evidence(
         evidenceId=record["evidenceId"],
         encryptedFileHash=record["encryptedFileHash"],
         fabricTxId=fabric_tx,
+    )
+
+
+@router.post("/export/bulk")
+def export_evidence_bulk(body: BulkExportRequest):
+    """Bundle multiple evidence blocks into one zip archive.
+
+    Each block is packaged individually under blocks/<evidenceId>/ inside the
+    master zip.  Fabric export events are logged for every included block.
+    """
+    from forensics.export_package import build_package
+
+    if not body.evidenceIds:
+        raise HTTPException(status_code=400, detail="evidenceIds must not be empty")
+
+    now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    master_manifest: dict = {"exportedAt": now_ts, "blocks": {}}
+
+    with tempfile.TemporaryDirectory() as tmp_root:
+        tmp = Path(tmp_root)
+        master_zip_path = tmp / "bulk-export.zip"
+
+        with zipfile.ZipFile(master_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as mzf:
+            for eid in body.evidenceIds:
+                block_dir = tmp / eid
+                block_dir.mkdir(exist_ok=True)
+                try:
+                    result = build_package(
+                        evidence_id=eid,
+                        out_dir=block_dir,
+                        storage_dir=settings.storage_dir,
+                        fabric_adapter_url=settings.fabric_adapter_url,
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=404, detail=str(exc))
+
+                with zipfile.ZipFile(Path(result["packagePath"]), "r") as bzf:
+                    for name in bzf.namelist():
+                        mzf.writestr(f"blocks/{eid}/{name}", bzf.read(name))
+
+                master_manifest["blocks"][eid] = {
+                    "filesIncluded": result["filesIncluded"],
+                    "tsaTokenIncluded": result["tsaTokenIncluded"],
+                    "fabricHistoryIncluded": result["fabricHistoryIncluded"],
+                    "verificationResultsIncluded": result["verificationResultsIncluded"],
+                }
+
+                fabric_client.log_export(
+                    evidence_id=eid,
+                    actor_id="operator",
+                    timestamp=now_ts,
+                    notes=f"bulk export ({len(body.evidenceIds)} blocks)",
+                )
+
+            mzf.writestr("MANIFEST.json", json.dumps(master_manifest, indent=2))
+            mzf.writestr(
+                "VERIFY_INSTRUCTIONS.md",
+                (
+                    f"# VidProof Bulk Export — {len(body.evidenceIds)} block(s)\n\n"
+                    "Each evidence block is in its own directory under `blocks/`.\n"
+                    "See `blocks/<evidenceId>/VERIFY_INSTRUCTIONS.md` for per-block "
+                    "verification steps using only OpenSSL and Python 3.\n"
+                ),
+            )
+
+        zip_bytes = master_zip_path.read_bytes()
+
+    filename = f"vidproof-export-{now_ts[:10]}.zip"
+    return RawResponse(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

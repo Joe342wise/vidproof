@@ -90,3 +90,13 @@ def export_evidence(evidence_id: str) -> bytes:
     resp = _session.post(_url(f"/evidence/{evidence_id}/export"), timeout=60)
     resp.raise_for_status()
     return resp.content
+
+
+def export_evidence_bulk(evidence_ids: list[str]) -> bytes:
+    resp = _session.post(
+        _url("/evidence/export/bulk"),
+        json={"evidenceIds": evidence_ids},
+        timeout=120,
+    )
+    resp.raise_for_status()
+    return resp.content

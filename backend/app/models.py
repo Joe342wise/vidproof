@@ -75,6 +75,10 @@ class IngestResponse(BaseModel):
     fabricTxId: str | None
 
 
+class BulkExportRequest(BaseModel):
+    evidenceIds: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Verification
 # ---------------------------------------------------------------------------

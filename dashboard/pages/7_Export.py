@@ -8,34 +8,40 @@ from dashboard import api_client
 st.set_page_config(page_title="Forensic Export — VidProof", layout="wide")
 st.title("Forensic Export")
 st.caption(
-    "Runs full verification before packaging — hash check, signature check, decryption, "
-    "and RFC 3161 timestamp. Failed blocks are flagged; user decides whether to include them."
+    "Select one or more evidence blocks. Full verification runs on each before packaging — "
+    "hash check, signature check, decryption, RFC 3161 timestamp. "
+    "Failed blocks are flagged; you decide whether to include them."
 )
 
 # ---------------------------------------------------------------------------
-# Session state initialisation
+# Session state
 # ---------------------------------------------------------------------------
-if "export_stage" not in st.session_state:
-    st.session_state.export_stage = "select"   # select | results | done
-if "export_evidence_id" not in st.session_state:
-    st.session_state.export_evidence_id = ""
-if "export_verify_result" not in st.session_state:
-    st.session_state.export_verify_result = {}
-if "export_zip_bytes" not in st.session_state:
-    st.session_state.export_zip_bytes = b""
-
-
 def _reset():
     st.session_state.export_stage = "select"
-    st.session_state.export_evidence_id = ""
-    st.session_state.export_verify_result = {}
+    st.session_state.export_selected_ids = []
+    st.session_state.export_verify_results = {}   # id → result dict
+    st.session_state.export_include = {}           # id → bool
     st.session_state.export_zip_bytes = b""
 
+for key, default in [
+    ("export_stage", "select"),
+    ("export_selected_ids", []),
+    ("export_verify_results", {}),
+    ("export_include", {}),
+    ("export_zip_bytes", b""),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-def _check_icon(value: bool | None, checked: bool) -> str:
+
+def _check_icon(value, checked: bool) -> str:
     if not checked:
         return "⏭ skipped"
     return "✅ pass" if value else "❌ FAIL"
+
+
+def _overall_icon(passed: bool) -> str:
+    return "✅ PASS" if passed else "❌ FAIL"
 
 
 # ---------------------------------------------------------------------------
@@ -49,111 +55,150 @@ if st.session_state.export_stage == "select":
         evidence_ids = []
 
     if evidence_ids:
-        evidence_id = st.selectbox("Evidence block", evidence_ids)
+        selected = st.multiselect(
+            "Evidence blocks to export",
+            options=evidence_ids,
+            placeholder="Select one or more blocks…",
+        )
     else:
-        evidence_id = st.text_input("Evidence ID", placeholder="ev-001")
+        raw = st.text_input("Evidence IDs (comma-separated)", placeholder="ev-001, ev-002")
+        selected = [s.strip() for s in raw.split(",") if s.strip()] if raw else []
 
+    n = len(selected)
     st.info(
-        "Clicking **Verify & Export** runs the full verification pipeline on this block "
-        "before any package is generated.",
+        f"{n} block{'s' if n != 1 else ''} selected. "
+        "Verification runs on each block before any package is generated.",
         icon="ℹ️",
     )
 
-    if st.button("Verify & Export", type="primary", disabled=not evidence_id):
-        with st.spinner("Running verification…"):
+    if st.button("Verify & Export", type="primary", disabled=n == 0):
+        verify_results: dict[str, dict] = {}
+        progress = st.progress(0, text="Starting verification…")
+        for i, eid in enumerate(selected):
+            progress.progress((i) / n, text=f"Verifying {eid} ({i + 1}/{n})…")
             try:
                 resp = api_client.verify_evidence(
-                    evidence_id.strip(),
-                    verifier_id="export-operator",
-                    include_decryption=True,
+                    eid, verifier_id="export-operator", include_decryption=True
                 )
+                verify_results[eid] = resp.get("result", {}) if resp.get("ok") else {
+                    "_error": resp.get("detail", "Verification failed")
+                }
             except Exception as exc:
-                st.error(f"Verification request failed: {exc}")
-                st.stop()
+                verify_results[eid] = {"_error": str(exc)}
+        progress.progress(1.0, text="Verification complete.")
 
-        if not resp.get("ok"):
-            st.error(f"Verification error: {resp.get('detail', resp)}")
-            st.stop()
-
-        st.session_state.export_evidence_id = evidence_id.strip()
-        st.session_state.export_verify_result = resp["result"]
+        st.session_state.export_selected_ids = selected
+        st.session_state.export_verify_results = verify_results
+        # Default: include all blocks (user can uncheck failed ones)
+        st.session_state.export_include = {eid: True for eid in selected}
         st.session_state.export_stage = "results"
         st.rerun()
 
 
 # ---------------------------------------------------------------------------
-# Stage: results — show per-check outcome, let user confirm
+# Stage: results — per-block outcome table + include/exclude
 # ---------------------------------------------------------------------------
 elif st.session_state.export_stage == "results":
-    r = st.session_state.export_verify_result
-    eid = st.session_state.export_evidence_id
-    passed = r.get("primaryDecision") == "PASS"
+    selected = st.session_state.export_selected_ids
+    results = st.session_state.export_verify_results
 
-    st.subheader(f"Verification results — {eid}")
+    all_passed = all(
+        r.get("primaryDecision") == "PASS"
+        for r in results.values()
+        if "_error" not in r
+    ) and not any("_error" in r for r in results.values())
 
-    if passed:
-        st.success("All primary checks passed.", icon="✅")
+    st.subheader("Verification Results")
+    if all_passed:
+        st.success(f"All {len(selected)} block(s) passed verification.", icon="✅")
     else:
-        st.error("One or more primary checks failed.", icon="❌")
+        st.warning("One or more blocks failed — review below and choose what to include.", icon="⚠️")
 
-    # Per-check table
-    checks = [
-        ("Encrypted file hash",   r.get("encryptedFileHashValid"), True),
-        ("Device signature",      r.get("deviceSignatureValid"),   True),
-        ("Decryption",            r.get("decryptionValid"),        r.get("decryptionAttempted", False)),
-        ("Plaintext hash match",  r.get("plaintextHashMatchesEvidence"), r.get("decryptionAttempted", False)),
-        ("RFC 3161 timestamp",    r.get("tsaValid"),               r.get("tsaChecked", False)),
-    ]
+    # Per-block table
+    include_state: dict[str, bool] = dict(st.session_state.export_include)
 
-    rows = "".join(
-        f"<tr>"
-        f"<td style='padding:6px 14px'>{name}</td>"
-        f"<td style='padding:6px 14px;font-family:monospace'>{_check_icon(val, chk)}</td>"
-        f"</tr>"
-        for name, val, chk in checks
-    )
-    st.markdown(
-        f"""<table style='border-collapse:collapse;font-size:0.9em;width:100%;max-width:560px'>
-        <thead><tr style='border-bottom:1px solid #334155'>
-          <th style='padding:6px 14px;text-align:left'>Check</th>
-          <th style='padding:6px 14px;text-align:left'>Result</th>
-        </tr></thead>
-        <tbody>{rows}</tbody></table>""",
-        unsafe_allow_html=True,
-    )
+    for eid in selected:
+        r = results.get(eid, {})
+        error = r.get("_error")
+        passed = not error and r.get("primaryDecision") == "PASS"
 
-    if r.get("tsaChecked") and r.get("tsaDetail"):
-        with st.expander("Timestamp detail"):
-            st.code(r["tsaDetail"])
+        with st.expander(
+            f"{'✅' if passed else '❌'}  {eid}",
+            expanded=not passed,
+        ):
+            if error:
+                st.error(f"Verification request failed: {error}")
+                include_state[eid] = st.checkbox(
+                    "Include this block anyway (verification could not run)",
+                    value=False,
+                    key=f"inc_{eid}",
+                )
+                continue
 
-    if r.get("notes"):
-        st.caption(f"Notes: {r['notes']}")
+            checks = [
+                ("Encrypted file hash", r.get("encryptedFileHashValid"), True),
+                ("Device signature",    r.get("deviceSignatureValid"),   True),
+                ("Decryption",          r.get("decryptionValid"),        r.get("decryptionAttempted", False)),
+                ("Plaintext hash match",r.get("plaintextHashMatchesEvidence"), r.get("decryptionAttempted", False)),
+                ("RFC 3161 timestamp",  r.get("tsaValid"),               r.get("tsaChecked", False)),
+            ]
+
+            rows = "".join(
+                f"<tr><td style='padding:4px 12px'>{name}</td>"
+                f"<td style='padding:4px 12px;font-family:monospace'>{_check_icon(val, chk)}</td></tr>"
+                for name, val, chk in checks
+            )
+            st.markdown(
+                f"""<table style='border-collapse:collapse;font-size:0.88em;margin-bottom:8px'>
+                <thead><tr style='border-bottom:1px solid #334155'>
+                  <th style='padding:4px 12px;text-align:left'>Check</th>
+                  <th style='padding:4px 12px;text-align:left'>Result</th>
+                </tr></thead><tbody>{rows}</tbody></table>""",
+                unsafe_allow_html=True,
+            )
+
+            if r.get("notes"):
+                st.caption(r["notes"])
+
+            if not passed:
+                st.warning(
+                    "A failed block is itself evidence of tampering — it should not be "
+                    "silently excluded. Include it clearly marked as failed, or exclude it.",
+                    icon="⚠️",
+                )
+                include_state[eid] = st.checkbox(
+                    "Include this failed block (marked as failed in the package)",
+                    value=False,
+                    key=f"inc_{eid}",
+                )
+            else:
+                include_state[eid] = True
+
+    st.session_state.export_include = include_state
 
     st.divider()
+    included = [eid for eid, inc in include_state.items() if inc]
+    excluded = [eid for eid in selected if not include_state.get(eid)]
 
-    include_failed = False
-    if not passed:
-        st.warning(
-            "This block failed verification. A failed block can still be included in the "
-            "export package — it is itself evidence of tampering and should not be silently "
-            "discarded. The package will clearly mark it as failed.",
-            icon="⚠️",
-        )
-        include_failed = st.checkbox("Include this failed block in the export package")
+    col_info, col_btn, col_back = st.columns([4, 2, 2])
+    with col_info:
+        if included:
+            st.markdown(f"**{len(included)} block(s) will be packaged:** {', '.join(f'`{e}`' for e in included)}")
+        if excluded:
+            st.markdown(f"**{len(excluded)} excluded:** {', '.join(f'`{e}`' for e in excluded)}")
 
-    col_pkg, col_back = st.columns([2, 6])
-    with col_pkg:
-        generate_disabled = not passed and not include_failed
-        if st.button("Generate Package", type="primary", disabled=generate_disabled):
-            with st.spinner("Building forensic package…"):
+    with col_btn:
+        if st.button("Generate Package", type="primary", disabled=len(included) == 0):
+            with st.spinner(f"Building package for {len(included)} block(s)…"):
                 try:
-                    zip_bytes = api_client.export_evidence(eid)
+                    zip_bytes = api_client.export_evidence_bulk(included)
                 except Exception as exc:
                     st.error(f"Export failed: {exc}")
                     st.stop()
             st.session_state.export_zip_bytes = zip_bytes
             st.session_state.export_stage = "done"
             st.rerun()
+
     with col_back:
         if st.button("Start over"):
             _reset()
@@ -164,42 +209,49 @@ elif st.session_state.export_stage == "results":
 # Stage: done — download
 # ---------------------------------------------------------------------------
 elif st.session_state.export_stage == "done":
-    eid = st.session_state.export_evidence_id
+    selected = st.session_state.export_selected_ids
+    include_state = st.session_state.export_include
     zip_bytes = st.session_state.export_zip_bytes
-    size_kb = len(zip_bytes) / 1024
+    included = [eid for eid in selected if include_state.get(eid)]
 
-    st.success(f"Package ready — {size_kb:.1f} KB", icon="📦")
+    size_kb = len(zip_bytes) / 1024
+    st.success(f"Package ready — {len(included)} block(s), {size_kb:.1f} KB", icon="📦")
+
+    from datetime import datetime, timezone
+    filename = f"vidproof-export-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.zip"
 
     st.download_button(
         label="Download .zip",
         data=zip_bytes,
-        file_name=f"{eid}.zip",
+        file_name=filename,
         mime="application/zip",
         type="primary",
     )
 
     st.divider()
-    st.subheader("Package Contents")
+    st.subheader("Package Structure")
+
+    rows = "\n".join(
+        f"| `blocks/{eid}/` | Evidence block, metadata, verification results, TSA token, Fabric history |"
+        for eid in included
+    )
     st.markdown(f"""
 | Path | Contents |
 |---|---|
-| `evidence/{eid}.enc` | AES-256-GCM encrypted video (ciphertext only) |
-| `metadata/evidence.json` | Immutable evidence record — hashes, signature, timestamps |
-| `metadata/camera.json` | Enrolled camera record — Ed25519 public key |
-| `metadata/verification-results/` | All verification runs for this evidence item |
-| `tsa/token.tsr` | RFC 3161 timestamp token (if captured) |
-| `fabric-history.json` | Hyperledger Fabric custody history (if Fabric is running) |
-| `MANIFEST.json` | SHA-256 hashes of every file in this package |
-| `VERIFY_INSTRUCTIONS.md` | Step-by-step independent verification guide |
+{rows}
+| `MANIFEST.json` | Block list, export timestamp, per-block summary |
+| `VERIFY_INSTRUCTIONS.md` | How to verify each block independently |
+
+Each `blocks/<id>/` directory contains its own `VERIFY_INSTRUCTIONS.md`
+with the exact OpenSSL and Python commands needed to verify that block
+without VidProof installed.
 """)
 
     st.info(
-        "The export event (including verification outcome) has been logged to Fabric. "
-        "The recipient can verify the package without VidProof installed — "
-        "see VERIFY_INSTRUCTIONS.md inside the zip.",
+        "Export events have been logged to Fabric for each included block.",
         icon="ℹ️",
     )
 
-    if st.button("Export another block"):
+    if st.button("Export another batch"):
         _reset()
         st.rerun()

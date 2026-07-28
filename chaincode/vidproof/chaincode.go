@@ -62,6 +62,47 @@ type CustodyEvent struct {
 	Notes      string `json:"notes,omitempty"`
 }
 
+// histEntry is the unified response type for GetEvidenceHistory.
+type histEntry struct {
+	EventType string          `json:"eventType"`
+	TxID      string          `json:"txId,omitempty"`
+	Timestamp string          `json:"timestamp,omitempty"`
+	IsDelete  bool            `json:"isDelete,omitempty"`
+	Value     json.RawMessage `json:"value,omitempty"`
+}
+
+// writeEvidenceHistoryIndex writes a composite-key index entry so that
+// GetEvidenceHistory can find all events related to an evidence ID.
+//
+// Key format: CreateCompositeKey("evhist", []string{evidenceID, eventType, eventID})
+// Value: the full event JSON.
+func writeEvidenceHistoryIndex(
+	ctx contractapi.TransactionContextInterface,
+	evidenceID, eventType, eventID, eventJSON string,
+) error {
+	ck, err := ctx.GetStub().CreateCompositeKey("evhist", []string{evidenceID, eventType, eventID})
+	if err != nil {
+		return fmt.Errorf("chaincode: writeEvidenceHistoryIndex: %w", err)
+	}
+	return ctx.GetStub().PutState(ck, []byte(eventJSON))
+}
+
+// extractTimestamp pulls a timestamp string out of an event JSON blob,
+// checking "verifiedAt" (verification events) and "timestamp" (custody events).
+func extractTimestamp(data []byte) string {
+	var v struct {
+		VerifiedAt string `json:"verifiedAt"`
+		Timestamp  string `json:"timestamp"`
+	}
+	if json.Unmarshal(data, &v) == nil {
+		if v.VerifiedAt != "" {
+			return v.VerifiedAt
+		}
+		return v.Timestamp
+	}
+	return ""
+}
+
 // RegisterCamera writes a camera record to the ledger.
 // Returns an error if cameraID is empty or already registered.
 func (s *SmartContract) RegisterCamera(ctx contractapi.TransactionContextInterface, cameraID, cameraJSON string) error {
@@ -102,7 +143,8 @@ func (s *SmartContract) RegisterEvidence(ctx contractapi.TransactionContextInter
 	return ctx.GetStub().PutState("ev:"+evidenceID, []byte(evidenceJSON))
 }
 
-// LogVerification appends a verification result to the ledger keyed by verificationID.
+// LogVerification appends a verification result to the ledger keyed by verificationID,
+// and writes a composite-key index entry so GetEvidenceHistory can find it.
 func (s *SmartContract) LogVerification(ctx contractapi.TransactionContextInterface, verificationID, verificationJSON string) error {
 	if verificationID == "" {
 		return fmt.Errorf("chaincode: LogVerification: verificationId must not be empty")
@@ -111,64 +153,138 @@ func (s *SmartContract) LogVerification(ctx contractapi.TransactionContextInterf
 	if err := json.Unmarshal([]byte(verificationJSON), &ev); err != nil {
 		return fmt.Errorf("chaincode: LogVerification: invalid JSON: %w", err)
 	}
-	return ctx.GetStub().PutState("ver:"+verificationID, []byte(verificationJSON))
+	if err := ctx.GetStub().PutState("ver:"+verificationID, []byte(verificationJSON)); err != nil {
+		return fmt.Errorf("chaincode: LogVerification: %w", err)
+	}
+	if ev.EvidenceID != "" {
+		if err := writeEvidenceHistoryIndex(ctx, ev.EvidenceID, "ver", verificationID, verificationJSON); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// LogAccess records a custody access event; the Fabric transaction ID is used as key.
+// LogAccess records a custody access event and indexes it under the evidence ID.
 func (s *SmartContract) LogAccess(ctx contractapi.TransactionContextInterface, custodyJSON string) error {
 	var ev CustodyEvent
 	if err := json.Unmarshal([]byte(custodyJSON), &ev); err != nil {
 		return fmt.Errorf("chaincode: LogAccess: invalid JSON: %w", err)
 	}
 	txID := ctx.GetStub().GetTxID()
-	return ctx.GetStub().PutState("custody:access:"+txID, []byte(custodyJSON))
+	if err := ctx.GetStub().PutState("custody:access:"+txID, []byte(custodyJSON)); err != nil {
+		return fmt.Errorf("chaincode: LogAccess: %w", err)
+	}
+	if ev.EvidenceID != "" {
+		if err := writeEvidenceHistoryIndex(ctx, ev.EvidenceID, "custody", txID, custodyJSON); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// LogExport records a custody export event; the Fabric transaction ID is used as key.
+// LogExport records a custody export event and indexes it under the evidence ID.
 func (s *SmartContract) LogExport(ctx contractapi.TransactionContextInterface, custodyJSON string) error {
 	var ev CustodyEvent
 	if err := json.Unmarshal([]byte(custodyJSON), &ev); err != nil {
 		return fmt.Errorf("chaincode: LogExport: invalid JSON: %w", err)
 	}
 	txID := ctx.GetStub().GetTxID()
-	return ctx.GetStub().PutState("custody:export:"+txID, []byte(custodyJSON))
+	if err := ctx.GetStub().PutState("custody:export:"+txID, []byte(custodyJSON)); err != nil {
+		return fmt.Errorf("chaincode: LogExport: %w", err)
+	}
+	if ev.EvidenceID != "" {
+		if err := writeEvidenceHistoryIndex(ctx, ev.EvidenceID, "custody", txID, custodyJSON); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// GetEvidenceHistory returns the full ledger history for an evidence key as a JSON array.
+// GetEvidenceHistory returns all ledger events related to an evidence ID as a JSON array.
+//
+// It combines two sources:
+//  1. GetHistoryForKey("ev:<id>") — the evidence registration history (requires a live peer;
+//     gracefully skipped if unavailable, e.g. in test environments).
+//  2. GetStateByPartialCompositeKey("evhist", [id]) — verification and custody events
+//     indexed at write time by LogVerification / LogAccess / LogExport.
 func (s *SmartContract) GetEvidenceHistory(ctx contractapi.TransactionContextInterface, evidenceID string) (string, error) {
 	if evidenceID == "" {
 		return "", fmt.Errorf("chaincode: GetEvidenceHistory: evidenceId must not be empty")
 	}
-	iter, err := ctx.GetStub().GetHistoryForKey("ev:" + evidenceID)
-	if err != nil {
-		return "", fmt.Errorf("chaincode: GetEvidenceHistory: %w", err)
-	}
-	defer iter.Close()
 
-	type historyEntry struct {
-		TxID      string          `json:"txId"`
-		Timestamp string          `json:"timestamp"`
-		IsDelete  bool            `json:"isDelete"`
-		Value     json.RawMessage `json:"value,omitempty"`
+	var entries []histEntry
+
+	// Source 1: ledger modification history for the evidence key.
+	// GetHistoryForKey requires a full Fabric peer; skip on error (test stubs return an error).
+	histIter, err := ctx.GetStub().GetHistoryForKey("ev:" + evidenceID)
+	if err == nil {
+		defer histIter.Close()
+		for histIter.HasNext() {
+			mod, err := histIter.Next()
+			if err != nil {
+				break
+			}
+			e := histEntry{
+				EventType: "evidence_registration",
+				TxID:      mod.TxId,
+				IsDelete:  mod.IsDelete,
+			}
+			if mod.Timestamp != nil {
+				e.Timestamp = mod.Timestamp.AsTime().UTC().Format("2006-01-02T15:04:05Z")
+			}
+			if !mod.IsDelete && len(mod.Value) > 0 {
+				e.Value = json.RawMessage(mod.Value)
+			}
+			entries = append(entries, e)
+		}
 	}
 
-	var entries []historyEntry
-	for iter.HasNext() {
-		mod, err := iter.Next()
-		if err != nil {
-			return "", fmt.Errorf("chaincode: GetEvidenceHistory: iterate: %w", err)
+	// Source 2: composite-key index for verification and custody events.
+	indexIter, err := ctx.GetStub().GetStateByPartialCompositeKey("evhist", []string{evidenceID})
+	if err == nil {
+		defer indexIter.Close()
+		for indexIter.HasNext() {
+			kv, err := indexIter.Next()
+			if err != nil {
+				break
+			}
+			_, parts, err := ctx.GetStub().SplitCompositeKey(kv.Key)
+			// parts: [evidenceID, eventType, eventID]
+			if err != nil || len(parts) < 3 {
+				continue
+			}
+			rawType := parts[1] // "ver" or "custody"
+			eventID := parts[2]
+
+			e := histEntry{TxID: eventID}
+			if len(kv.Value) > 0 {
+				e.Value = json.RawMessage(kv.Value)
+				e.Timestamp = extractTimestamp(kv.Value)
+			}
+
+			switch rawType {
+			case "ver":
+				e.EventType = "verification"
+			case "custody":
+				// Read the sub-type ("access" or "export") from the stored JSON.
+				var ce struct {
+					EventType string `json:"eventType"`
+				}
+				if len(kv.Value) > 0 && json.Unmarshal(kv.Value, &ce) == nil && ce.EventType != "" {
+					e.EventType = ce.EventType
+				} else {
+					e.EventType = "custody"
+				}
+			default:
+				e.EventType = rawType
+			}
+
+			entries = append(entries, e)
 		}
-		entry := historyEntry{
-			TxID:     mod.TxId,
-			IsDelete: mod.IsDelete,
-		}
-		if mod.Timestamp != nil {
-			entry.Timestamp = mod.Timestamp.AsTime().UTC().Format("2006-01-02T15:04:05Z")
-		}
-		if !mod.IsDelete && len(mod.Value) > 0 {
-			entry.Value = json.RawMessage(mod.Value)
-		}
-		entries = append(entries, entry)
+	}
+
+	if entries == nil {
+		entries = []histEntry{}
 	}
 
 	out, err := json.Marshal(entries)

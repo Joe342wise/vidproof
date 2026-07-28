@@ -17,6 +17,7 @@ class EnrollCameraResponse(BaseModel):
     cameraId: str
     cameraJsonPath: str
     privateKeyPath: str
+    publicKeyEd25519: str
 
 
 class CameraRecord(BaseModel):

@@ -29,6 +29,7 @@ def enroll_camera(req: EnrollCameraRequest):
         cameraId=record["cameraId"],
         cameraJsonPath=record["_cameraJsonPath"],
         privateKeyPath=record["_privateKeyPath"],
+        publicKeyEd25519=record["publicKeyEd25519"],
     )
 
 

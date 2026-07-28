@@ -2,9 +2,25 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+import io
+import json
 from datetime import datetime, timezone, timedelta
 import streamlit as st
+import qrcode
 from dashboard import api_client
+
+
+def _make_qr_png(camera_id: str, public_key: str, enrolled_at: str = "") -> bytes:
+    """Return PNG bytes of a QR code encoding the camera's pairing payload."""
+    payload = json.dumps({
+        "cameraId": camera_id,
+        "publicKeyEd25519": public_key,
+        "enrolledAt": enrolled_at,
+    }, separators=(",", ":"))
+    img = qrcode.make(payload)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 st.set_page_config(page_title="Cameras — VidProof", layout="wide")
 st.title("Cameras")
@@ -40,6 +56,27 @@ with st.expander("Enroll a new camera", expanded=False):
                         st.success(f"Enrolled **{result['cameraId']}**")
                         st.info(f"Private key: `{result['privateKeyPath']}`")
                         st.info(f"Camera record: `{result['cameraJsonPath']}`")
+
+                        # Pairing QR code — scan to trust this camera
+                        qr_png = _make_qr_png(
+                            camera_id=result["cameraId"],
+                            public_key=result.get("publicKeyEd25519", ""),
+                        )
+                        st.markdown("**Scan to pair**")
+                        st.caption(
+                            "This QR code contains the camera's Ed25519 public key. "
+                            "Scan it on the owner device to establish trust without any third party."
+                        )
+                        col_qr, col_dl = st.columns([1, 3])
+                        with col_qr:
+                            st.image(qr_png, width=220)
+                        with col_dl:
+                            st.download_button(
+                                "Download pairing QR (PNG)",
+                                data=qr_png,
+                                file_name=f"{result['cameraId']}-pairing-qr.png",
+                                mime="image/png",
+                            )
                     else:
                         st.error(result.get("detail", "Enrollment failed"))
                 except Exception as exc:
@@ -231,6 +268,31 @@ for row_start in range(0, len(cameras), COLS_PER_ROW):
         stats = _camera_stats(cam.get("cameraId", ""))
         with col:
             st.markdown(_card_html(cam, stats), unsafe_allow_html=True)
+            with st.expander("Show pairing QR"):
+                pub_key = cam.get("publicKeyEd25519", "")
+                if pub_key:
+                    qr_png = _make_qr_png(
+                        camera_id=cam["cameraId"],
+                        public_key=pub_key,
+                        enrolled_at=cam.get("enrollmentTimestamp", ""),
+                    )
+                    st.caption(
+                        "Scan this QR code on the owner device to establish "
+                        "trust — it encodes the camera ID and Ed25519 public key."
+                    )
+                    col_img, col_btn = st.columns([1, 2])
+                    with col_img:
+                        st.image(qr_png, width=180)
+                    with col_btn:
+                        st.download_button(
+                            "Download PNG",
+                            data=qr_png,
+                            file_name=f"{cam['cameraId']}-pairing-qr.png",
+                            mime="image/png",
+                            key=f"dl_qr_{cam['cameraId']}",
+                        )
+                else:
+                    st.warning("Public key not available in camera record.")
 
     # pad empty column in an odd-count last row
     if len(row_cameras) < COLS_PER_ROW:

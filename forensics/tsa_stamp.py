@@ -14,6 +14,7 @@ Output (stdout):
 import argparse
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -21,6 +22,69 @@ import tempfile
 from pathlib import Path
 
 import requests
+
+_log = logging.getLogger(__name__)
+
+
+def stamp_evidence_hash(
+    hash_hex: str,
+    tsa_url: str,
+    out_path: Path,
+) -> dict | None:
+    """Request an RFC 3161 timestamp for hash_hex and write the token to out_path.
+
+    Returns {"tsrPath": str, "tsaTokenHash": str} on success, None if the TSA
+    is unreachable or openssl fails.  Never raises — callers degrade gracefully.
+    """
+    try:
+        bytes.fromhex(hash_hex)
+    except ValueError:
+        _log.warning("tsa_stamp: invalid hex digest: %r", hash_hex)
+        return None
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tsq_str = tempfile.mkstemp(suffix=".tsq")
+    os.close(fd)
+    tsq_path = Path(tsq_str)
+
+    try:
+        proc = subprocess.run(
+            ["openssl", "ts", "-query", "-sha256", "-digest", hash_hex, "-cert", "-out", str(tsq_path)],
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            _log.warning("tsa_stamp: openssl ts -query failed: %s",
+                         proc.stderr.decode(errors="replace").strip())
+            return None
+
+        try:
+            resp = requests.post(
+                tsa_url,
+                data=tsq_path.read_bytes(),
+                headers={"Content-Type": "application/timestamp-query"},
+                timeout=10,
+            )
+        except requests.exceptions.RequestException as exc:
+            _log.info("tsa_stamp: TSA unreachable at %s: %s", tsa_url, exc)
+            return None
+
+        if resp.status_code != 200:
+            _log.warning("tsa_stamp: TSA HTTP %d", resp.status_code)
+            return None
+
+        tsr_bytes = resp.content
+        if not tsr_bytes:
+            _log.warning("tsa_stamp: TSA returned empty response")
+            return None
+
+        out_path.write_bytes(tsr_bytes)
+        return {"tsrPath": str(out_path), "tsaTokenHash": hashlib.sha256(tsr_bytes).hexdigest()}
+
+    except Exception as exc:
+        _log.warning("tsa_stamp: unexpected error: %s", exc)
+        return None
+    finally:
+        tsq_path.unlink(missing_ok=True)
 
 
 def fail(code: str, message: str) -> None:

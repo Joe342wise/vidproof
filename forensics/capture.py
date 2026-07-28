@@ -28,6 +28,7 @@ def run_capture(
     privkey_path: Path,
     evidence_id: str,
     storage_dir: Path,
+    tsa_url: str = "",
 ) -> dict:
     try:
         plaintext = video_path.read_bytes()
@@ -78,6 +79,17 @@ def run_capture(
     object_uri = str(enc_path)
     capture_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    tsa_token_ref = ""
+    tsa_token_hash = ""
+    if tsa_url:
+        from forensics.tsa_stamp import stamp_evidence_hash
+        tsa_result = stamp_evidence_hash(
+            encrypted_file_hash, tsa_url, storage_dir / "tsa" / f"{evidence_id}.tsr"
+        )
+        if tsa_result:
+            tsa_token_ref = tsa_result["tsrPath"]
+            tsa_token_hash = tsa_result["tsaTokenHash"]
+
     record = {
         "evidenceId": evidence_id,
         "cameraId": camera["cameraId"],
@@ -91,7 +103,8 @@ def run_capture(
         "captureTimestamp": capture_timestamp,
         "deviceSignature": device_signature,
         "prnuCaptureScore": 0.0,
-        "tsaTokenRef": "",
+        "tsaTokenRef": tsa_token_ref,
+        "tsaTokenHash": tsa_token_hash,
         "fabricTxId": "",
     }
 

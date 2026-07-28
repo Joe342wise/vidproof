@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from backend.app.config import settings
+from backend.app.services import fabric_client
 from forensics.enroll import (
     build_camera_record,
     generate_ed25519_keypair,
@@ -44,6 +45,8 @@ def enroll_camera(
     camera_json_path = write_camera_json(record, settings.cameras_dir)
     record["_privateKeyPath"] = str(privkey_path)
     record["_cameraJsonPath"] = str(camera_json_path)
+
+    fabric_client.register_camera(camera_id, record)
     return record
 
 

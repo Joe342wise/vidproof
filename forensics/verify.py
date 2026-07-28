@@ -31,6 +31,8 @@ def run_verify(
     owner_privkey_path: Path | None = None,
     verifier_id: str = "system",
     evidence_json_override: Path | None = None,
+    tsa_ca_cert: Path | None = None,
+    tsa_cert: Path | None = None,
 ) -> dict:
     # Resolve evidence.json path — override is for tamper testing only
     if evidence_json_override is not None:
@@ -107,6 +109,21 @@ def run_verify(
             decryption_valid = False
             notes_parts.append(f"Decryption I/O error: {exc}")
 
+    # Step 4: RFC 3161 timestamp verification (optional — skipped if no token or no certs)
+    tsa_checked = False
+    tsa_valid: bool | None = None
+    tsa_detail: str | None = None
+
+    tsr_ref = evidence.get("tsaTokenRef", "")
+    if tsr_ref and tsa_ca_cert and tsa_cert:
+        from forensics.tsa_verify import verify_tsa_token
+        tsa_result = verify_tsa_token(Path(tsr_ref), evidence["encryptedFileHash"], tsa_ca_cert, tsa_cert)
+        tsa_checked = True
+        tsa_valid = tsa_result["valid"]
+        tsa_detail = tsa_result["detail"]
+        if not tsa_valid:
+            notes_parts.append(f"RFC 3161 timestamp verification failed: {tsa_detail}")
+
     primary_decision = "PASS" if encrypted_file_hash_valid and device_signature_valid else "FAIL"
 
     if not encrypted_file_hash_valid:
@@ -130,6 +147,9 @@ def run_verify(
         "plaintextHashMatchesEvidence": plaintext_hash_matches_evidence,
         "prnuChecked": False,
         "prnuScore": None,
+        "tsaChecked": tsa_checked,
+        "tsaValid": tsa_valid,
+        "tsaDetail": tsa_detail,
         "primaryDecision": primary_decision,
         "notes": " ".join(notes_parts) if notes_parts else "All primary checks passed.",
     }

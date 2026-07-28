@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from backend.app.config import settings
+from backend.app.services import fabric_client
 from forensics.verify import run_verify
 
 
@@ -37,13 +38,21 @@ def verify_evidence(
             )
         owner_privkey_path = candidate
 
-    return run_verify(
+    tsa_ca = settings.tsa_ca_cert if settings.tsa_ca_cert.exists() else None
+    tsa_crt = settings.tsa_cert if settings.tsa_cert.exists() else None
+
+    result = run_verify(
         evidence_id=evidence_id,
         camera_json_path=camera_json_path,
         storage_dir=settings.storage_dir,
         owner_privkey_path=owner_privkey_path,
         verifier_id=verifier_id,
+        tsa_ca_cert=tsa_ca,
+        tsa_cert=tsa_crt,
     )
+
+    fabric_client.log_verification(result["verificationId"], result)
+    return result
 
 
 def list_verification_results(evidence_id: str) -> list[dict]:

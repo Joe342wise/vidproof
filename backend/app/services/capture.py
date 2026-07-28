@@ -4,6 +4,8 @@ import os
 import uuid
 from pathlib import Path
 
+from forensics.tsa_stamp import stamp_evidence_hash
+
 from backend.app.config import settings
 from forensics.capture import run_capture
 
@@ -49,6 +51,7 @@ def capture_evidence(
         privkey_path=privkey_path,
         evidence_id=eid,
         storage_dir=settings.storage_dir,
+        tsa_url=settings.tsa_url,
     )
 
 
@@ -129,8 +132,19 @@ def ingest_device_evidence(evidence_json_str: str, enc_bytes: bytes) -> dict:
 
     evidence.setdefault("objectUri", str(enc_path))
     evidence.setdefault("prnuCaptureScore", 0.0)
-    evidence.setdefault("tsaTokenRef", "")
     evidence.setdefault("fabricTxId", "")
+
+    tsa_result = stamp_evidence_hash(
+        evidence["encryptedFileHash"],
+        settings.tsa_url,
+        settings.tsa_dir / f"{eid}.tsr",
+    )
+    if tsa_result:
+        evidence["tsaTokenRef"] = tsa_result["tsrPath"]
+        evidence["tsaTokenHash"] = tsa_result["tsaTokenHash"]
+    else:
+        evidence.setdefault("tsaTokenRef", "")
+        evidence.setdefault("tsaTokenHash", "")
 
     evidence_path.write_text(json.dumps(evidence, indent=2))
     os.chmod(evidence_path, 0o444)

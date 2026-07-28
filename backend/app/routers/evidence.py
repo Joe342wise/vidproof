@@ -1,5 +1,6 @@
 import os
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -131,6 +132,13 @@ def export_evidence_package(evidence_id: str):
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         zip_bytes = Path(result["packagePath"]).read_bytes()
+
+    fabric_client.log_export(
+        evidence_id=evidence_id,
+        actor_id="operator",
+        timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        notes="forensic export package generated",
+    )
 
     return RawResponse(
         content=zip_bytes,

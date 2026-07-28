@@ -6,6 +6,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     storage_dir: Path = Path("storage")
     fabric_adapter_url: str = "http://localhost:8081"
+    tsa_url: str = "http://localhost:2560"
+    tsa_ca_cert: Path = Path("infra/tsa/ca.crt")
+    tsa_cert: Path = Path("infra/tsa/tsa.crt")
 
     @property
     def evidence_dir(self) -> Path:
@@ -30,6 +33,10 @@ class Settings(BaseSettings):
     @property
     def results_dir(self) -> Path:
         return self.metadata_dir / "results"
+
+    @property
+    def tsa_dir(self) -> Path:
+        return self.storage_dir / "tsa"
 
     model_config = {"env_prefix": "VIDPROOF_"}
 

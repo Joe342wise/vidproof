@@ -56,6 +56,7 @@ class EvidenceRecord(BaseModel):
     deviceSignature: str
     prnuCaptureScore: float
     tsaTokenRef: str
+    tsaTokenHash: str = ""
     fabricTxId: str
 
 
@@ -96,6 +97,9 @@ class VerificationResult(BaseModel):
     plaintextHashMatchesEvidence: bool
     prnuChecked: bool
     prnuScore: float | None
+    tsaChecked: bool = False
+    tsaValid: bool | None = None
+    tsaDetail: str | None = None
     primaryDecision: str
     notes: str
 

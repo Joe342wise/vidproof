@@ -25,6 +25,9 @@ The software track must preserve these contracts for hardware integration:
 - File-mode and Pi-mode must both produce the same kind of video byte input for signing and encryption.
 - The dashboard must not handle private keys directly.
 - PRNU results must be labeled secondary and must not replace signature verification.
+- System-workaround alignment fixes are tracked in `docs/system-workaround-alignment-fixes.md` and must be treated as implementation requirements.
+- Export must run verification before final package generation.
+- Failed evidence blocks must be shown with specific reasons and must not be silently included or excluded.
 
 ## Phase 0: Environment Setup
 
@@ -167,6 +170,8 @@ Expose the working local workflow through API endpoints.
 5. Add endpoint to verify one evidence item.
 6. Add endpoint to retrieve verification results.
 7. Add consistent error responses.
+8. Add API support for export preview: selected evidence IDs, verification run, pass/fail results, and user inclusion choices.
+9. Add API support for camera status and block counts for the dashboard.
 
 ### Deliverables
 
@@ -179,6 +184,8 @@ Expose the working local workflow through API endpoints.
 - Backend can trigger file-mode capture.
 - Backend can trigger verification.
 - Backend returns structured JSON errors.
+- Backend can provide export-preview data before package generation.
+- Backend can report evidence verification status as `Verified`, `Failed`, or `Not Yet Checked`.
 
 ## Phase 5: Streamlit Dashboard
 
@@ -196,6 +203,11 @@ Provide a simple operator/investigator interface for demos and testing.
 6. Display verification results.
 7. Clearly label PRNU as secondary.
 8. Display chain-of-custody placeholder until Fabric is integrated.
+9. Add camera cards showing status: `Recording`, `Off`, or `Error/Unreachable`.
+10. Add total blocks received per camera.
+11. Add `Verification Status` badge to evidence list: `Verified`, `Failed`, or `Not Yet Checked`.
+12. Add export flow that shows per-block verification results before final package generation.
+13. Add include/exclude controls for failed blocks.
 
 ### Deliverables
 
@@ -207,6 +219,8 @@ Provide a simple operator/investigator interface for demos and testing.
 - User can view evidence records.
 - User can run verification from dashboard.
 - User can see pass/fail status and reason.
+- User can see camera status and block counts.
+- User can see failed export blocks and choose whether to include or exclude them.
 
 ## Phase 6: Go Chaincode
 
@@ -224,7 +238,8 @@ Implement Fabric smart contract records for cameras, evidence, and custody event
 6. Implement `LogExport`.
 7. Implement `GetEvidenceHistory`.
 8. Implement `VerifyEvidenceHash`.
-9. Add unit tests where possible.
+9. Add evidence-linked event indexing so verification, access, export, and failure events can be queried by evidence ID.
+10. Add unit tests where possible.
 
 ### Deliverables
 
@@ -237,6 +252,7 @@ Implement Fabric smart contract records for cameras, evidence, and custody event
 - Registering a camera stores public key metadata.
 - Registering evidence stores hashes/signatures, not raw video.
 - Verification logs are append-only events.
+- `GetEvidenceHistory(evidenceID)` returns evidence registration, verification, access, export, and failure events related to that evidence ID.
 
 ## Phase 7: Fabric Test Network And Go Adapter
 
@@ -256,6 +272,8 @@ Connect the Python backend to Fabric through the Go adapter.
 8. Implement adapter endpoint `GET /evidence/{id}/history`.
 9. Update FastAPI backend to call adapter.
 10. Add dashboard display for Fabric transaction IDs and history.
+11. Wire backend operations to Fabric: enrollment -> `RegisterCamera`, capture/ingest -> `RegisterEvidence`, verification -> `LogVerification`, export -> `LogExport`.
+12. Add failure logging for verification and export failures.
 
 ### Deliverables
 
@@ -269,6 +287,8 @@ Connect the Python backend to Fabric through the Go adapter.
 - Evidence registration creates a Fabric transaction.
 - Verification result creates a Fabric transaction.
 - Evidence history can be queried through the backend.
+- Export creates a Fabric transaction recording selected blocks, pass/fail status, and inclusion decisions.
+- Fabric-unavailable cases are visible to the user and do not silently disappear.
 
 ## Phase 8: RFC 3161 Timestamping
 
@@ -284,6 +304,8 @@ Add independently verifiable timestamp proofs.
 4. Store TSA token hash in Fabric.
 5. Add timestamp verification command.
 6. Add timestamp verification result to dashboard.
+7. Timestamp verification results when verification is performed.
+8. Timestamp export package hash when export is finalized.
 
 ### Deliverables
 
@@ -296,6 +318,7 @@ Add independently verifiable timestamp proofs.
 - Timestamp token verifies using OpenSSL.
 - Timestamp token hash is stored in metadata/Fabric.
 - Invalid or missing token is reported clearly.
+- Capture, verification, and export timestamp states are visible in the dashboard/export package.
 
 ## Phase 9: Forensic Export Package
 
@@ -306,17 +329,21 @@ Generate a package that a third party can independently verify.
 ### Tasks
 
 1. Define export manifest format.
-2. Collect encrypted evidence file.
-3. Collect camera metadata or public-key record.
-4. Collect immutable evidence metadata.
-5. Collect verification results.
-6. Collect Fabric transaction IDs/history.
-7. Collect RFC 3161 timestamp tokens and TSA certificate.
-8. Add verification instructions.
-9. Hash export package.
-10. Timestamp export package hash.
-11. Log export event to Fabric.
-12. Create export archive.
+2. Allow selecting one or more evidence blocks.
+3. Run verification for each selected block before final packaging.
+4. Show per-block verification results before package generation.
+5. Let the user include or exclude failed blocks.
+6. Collect encrypted evidence files for included blocks.
+7. Collect camera metadata or public-key records.
+8. Collect immutable evidence metadata.
+9. Collect verification results generated during export.
+10. Collect Fabric transaction IDs/history.
+11. Collect RFC 3161 timestamp tokens and TSA certificate.
+12. Add verification instructions.
+13. Hash export package.
+14. Timestamp export package hash.
+15. Log export event and inclusion decisions to Fabric.
+16. Create export archive.
 
 ### Deliverables
 
@@ -329,6 +356,9 @@ Generate a package that a third party can independently verify.
 - Export package contains enough data for independent verification.
 - Export process does not require decrypted video by default.
 - Temporary plaintext is deleted when decryption is used.
+- Export does not silently package unchecked blocks.
+- Failed blocks are clearly marked with failure reasons.
+- User include/exclude decisions are recorded in the export manifest and logged to Fabric when available.
 
 ## Phase 10: Attack Scenario Testing
 
@@ -349,6 +379,8 @@ Demonstrate that the prototype detects expected failures.
 | Edit local metadata after Fabric logging | Fabric/local mismatch detected |
 | Forge custody event | Fabric identity/signature rejection |
 | PRNU different-camera test | Lower or inconsistent correlation, reported as secondary |
+| Export failed block | Failed block is shown with reason and include/exclude choice |
+| Export without prior verification | Export flow runs verification before packaging |
 
 ### Deliverables
 
@@ -361,6 +393,7 @@ Demonstrate that the prototype detects expected failures.
 - Each planned attack has a documented result.
 - Failures are reported clearly by backend/dashboard.
 - Results can be included in Chapter 4.
+- Failed blocks are never silently dropped or silently included.
 
 ## Software Build Order
 
@@ -372,8 +405,9 @@ Demonstrate that the prototype detects expected failures.
 6. Go chaincode.
 7. Fabric test network and Go adapter.
 8. RFC 3161 timestamping.
-9. Forensic export package.
-10. Attack scenario testing.
+9. Export pre-verification and failed-block handling.
+10. Forensic export package.
+11. Attack scenario testing.
 
 ## Immediate Software Priority
 

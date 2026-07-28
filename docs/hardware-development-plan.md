@@ -11,6 +11,8 @@ This plan covers VidProof's hardware implementation: Raspberry Pi setup, camera 
 - The camera private key must never leave the Pi once deployed.
 - PRNU data collection must record camera settings and compression details.
 - A file-mode fallback should always be available for demos.
+- Pairing/trust establishment must be implemented or clearly documented as prototype manual pairing.
+- The Pi must expose enough status information for the dashboard to show `Recording`, `Off`, or `Error/Unreachable`.
 
 ## Shared Contracts
 
@@ -21,6 +23,8 @@ The hardware track must satisfy these software-facing contracts:
 - Provide camera ID and capture metadata needed for `evidence.json`.
 - Upload encrypted evidence and metadata to the FastAPI backend.
 - Collect PRNU reference/test clips without treating PRNU as the primary gate.
+- Report block counts and capture status to the backend when Pi-mode is enabled.
+- Keep encrypted evidence unreadable to the storage/backend layer unless export decryption is authorized.
 
 ## Phase 0: Hardware Inventory And Preparation
 
@@ -64,6 +68,7 @@ Prepare the Pi as a reliable edge capture device.
 5. Install Python runtime and project dependencies needed on the Pi.
 6. Confirm system time synchronization or document time-source limitations.
 7. Create local directories for keys, captured segments, temporary files, and logs.
+8. Decide whether the prototype uses manual pairing, QR-code pairing, or Bluetooth pairing.
 
 ### Deliverables
 
@@ -75,6 +80,33 @@ Prepare the Pi as a reliable edge capture device.
 - Pi can capture a test image.
 - Pi can capture a short video clip.
 - Captured video can be copied to the development machine.
+- Pairing approach is documented for the report and demo.
+
+## Phase 1A: Pairing And Trust Establishment
+
+### Goal
+
+Align hardware setup with the CaCTUs-style trust-establishment expectation in `System-Work-around.md`.
+
+### Tasks
+
+1. Choose prototype pairing mode: manual, QR-code, or Bluetooth.
+2. If manual, document how the owner public key is transferred to the Pi and how the camera public key is trusted.
+3. If QR-code, display or print a QR code containing camera ID and camera public key.
+4. If Bluetooth, exchange camera and owner public keys over a local pairing session.
+5. Confirm camera private key remains on the Pi after pairing.
+
+### Deliverables
+
+- Pairing method note.
+- Camera public-key trust record.
+- Owner public-key installation record.
+
+### Acceptance Criteria
+
+- The owner can identify which camera public key belongs to the physical camera.
+- The Pi has the owner/investigator public key needed for key wrapping.
+- The report clearly states whether QR/Bluetooth is implemented or simulated.
 
 ## Phase 2: Basic 10-Second Capture Test
 
@@ -168,6 +200,8 @@ Send encrypted evidence and metadata from the Pi to the backend.
 5. Upload `evidence.json`.
 6. Handle failed uploads by retrying or storing pending records locally.
 7. Confirm backend receives and stores the evidence.
+8. Send camera status and latest block count to the backend if status endpoint support exists.
+9. Confirm the backend/storage layer receives only encrypted evidence, never plaintext footage.
 
 ### Deliverables
 
@@ -179,6 +213,8 @@ Send encrypted evidence and metadata from the Pi to the backend.
 - Pi-generated evidence appears in backend evidence list.
 - Pi-generated evidence verifies using the same verifier as file-mode evidence.
 - Network failure does not silently discard captured evidence.
+- Dashboard can show a meaningful camera status for the Pi.
+- Plaintext footage is not uploaded to the backend.
 
 ## Phase 6: Continuous Capture Service
 
@@ -195,6 +231,8 @@ Run capture repeatedly as a prototype surveillance device.
 5. Monitor disk usage.
 6. Monitor CPU and memory usage.
 7. Confirm transaction volume assumptions for continuous recording.
+8. Track total blocks captured and total blocks uploaded.
+9. Record and expose capture errors for dashboard display.
 
 ### Deliverables
 
@@ -206,6 +244,8 @@ Run capture repeatedly as a prototype surveillance device.
 - Pi can capture multiple consecutive 10-second segments.
 - Each segment produces a separate evidence record.
 - Continuous mode does not overwrite evidence or metadata.
+- Block counts are available for dashboard display.
+- Capture failures are visible and do not produce valid evidence records.
 
 ## Phase 7: PRNU Data Collection
 
@@ -221,6 +261,7 @@ Collect real footage required for PRNU secondary evaluation.
 4. Capture different-camera clips if another camera is available.
 5. Record camera settings for each clip.
 6. Transfer clips to the software environment for PRNU processing.
+7. Record whether clips are reference, same-camera test, or different-camera test samples.
 
 ### Deliverables
 
@@ -234,6 +275,7 @@ Collect real footage required for PRNU secondary evaluation.
 - PRNU evaluation has real Pi-generated data.
 - Compression settings are known and documented.
 - PRNU can be reported as measured evidence, not assumed performance.
+- PRNU results can be linked to the exact camera settings used during capture.
 
 ## Phase 8: Hardware Validation And Demo Readiness
 
@@ -249,6 +291,8 @@ Prepare the hardware setup for presentation and evaluation.
 4. Test dashboard display of Pi evidence.
 5. Prepare a short live demo script.
 6. Prepare fallback sample clips in case hardware fails during presentation.
+7. Test export flow using at least one Pi-generated evidence block.
+8. Confirm failed-block handling can be demonstrated using a tampered Pi-generated block or a file-mode fallback.
 
 ### Deliverables
 
@@ -261,18 +305,20 @@ Prepare the hardware setup for presentation and evaluation.
 - Demo can show real Pi evidence if hardware is available.
 - Demo can fall back to file-mode evidence if hardware fails.
 - The report clearly distinguishes software verification from hardware capture.
+- Demo can show camera status, block count, evidence verification, and export package generation.
 
 ## Hardware Build Order
 
 1. Hardware inventory and preparation.
 2. Raspberry Pi OS and camera setup.
-3. Basic 10-second capture test.
-4. Pi capture function.
-5. Device key storage on Pi.
-6. Pi-to-backend upload.
-7. Continuous capture service.
-8. PRNU data collection.
-9. Hardware validation and demo readiness.
+3. Pairing and trust establishment.
+4. Basic 10-second capture test.
+5. Pi capture function.
+6. Device key storage on Pi.
+7. Pi-to-backend upload.
+8. Continuous capture service.
+9. PRNU data collection.
+10. Hardware validation and demo readiness.
 
 ## Integration With Software
 
@@ -281,10 +327,12 @@ Prepare the hardware setup for presentation and evaluation.
 - The backend should not care whether evidence came from file mode or Pi mode.
 - Fabric integration should happen only after local software verification works.
 - PRNU should be evaluated with real Pi footage after the hardware capture path is stable.
+- Export-flow testing should include at least one Pi-generated block once upload is stable.
 
 ## Immediate Hardware Priority
 
 1. Confirm Raspberry Pi and Camera Module v2 availability.
 2. Install and configure Raspberry Pi OS.
-3. Capture basic 10-second clips.
-4. Record camera settings and copy clips to the software environment.
+3. Decide and document prototype pairing mode.
+4. Capture basic 10-second clips.
+5. Record camera settings and copy clips to the software environment.

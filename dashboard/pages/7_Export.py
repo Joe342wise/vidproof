@@ -34,6 +34,22 @@ for key, default in [
         st.session_state[key] = default
 
 
+def _failure_reason(r: dict) -> str:
+    """Return a specific human-readable failure reason for a failed block."""
+    reasons = []
+    if r.get("encryptedFileHashValid") is False:
+        reasons.append("hash mismatch")
+    if r.get("deviceSignatureValid") is False:
+        reasons.append("invalid signature")
+    if r.get("tsaChecked") and r.get("tsaValid") is False:
+        reasons.append("invalid timestamp")
+    if r.get("decryptionAttempted") and r.get("decryptionValid") is False:
+        reasons.append("decryption failed")
+    if r.get("decryptionAttempted") and r.get("plaintextHashMatchesEvidence") is False:
+        reasons.append("plaintext hash mismatch")
+    return ", ".join(reasons) if reasons else "unknown"
+
+
 def _check_icon(value, checked: bool) -> str:
     if not checked:
         return "⏭ skipped"
@@ -48,6 +64,9 @@ def _overall_icon(passed: bool) -> str:
 # Stage: select
 # ---------------------------------------------------------------------------
 if st.session_state.export_stage == "select":
+    # Consume pre-selection from the Evidence page if present
+    preselected = st.session_state.pop("export_preselected", [])
+
     try:
         evidence_list = api_client.list_evidence()
         evidence_ids = [e["evidenceId"] for e in evidence_list] if evidence_list else []
@@ -58,10 +77,12 @@ if st.session_state.export_stage == "select":
         selected = st.multiselect(
             "Evidence blocks to export",
             options=evidence_ids,
+            default=preselected if preselected else None,
             placeholder="Select one or more blocks…",
         )
     else:
-        raw = st.text_input("Evidence IDs (comma-separated)", placeholder="ev-001, ev-002")
+        raw = st.text_input("Evidence IDs (comma-separated)", placeholder="ev-001, ev-002",
+                            value=", ".join(preselected) if preselected else "")
         selected = [s.strip() for s in raw.split(",") if s.strip()] if raw else []
 
     n = len(selected)
@@ -89,9 +110,24 @@ if st.session_state.export_stage == "select":
 
         st.session_state.export_selected_ids = selected
         st.session_state.export_verify_results = verify_results
-        # Default: include all blocks (user can uncheck failed ones)
         st.session_state.export_include = {eid: True for eid in selected}
-        st.session_state.export_stage = "results"
+
+        # If everything passed, skip results screen and package immediately
+        all_passed = all(
+            not r.get("_error") and r.get("primaryDecision") == "PASS"
+            for r in verify_results.values()
+        )
+        if all_passed:
+            with st.spinner(f"All {n} block(s) verified — building package…"):
+                try:
+                    zip_bytes = api_client.export_evidence_bulk(selected)
+                except Exception as exc:
+                    st.error(f"Export failed: {exc}")
+                    st.stop()
+            st.session_state.export_zip_bytes = zip_bytes
+            st.session_state.export_stage = "done"
+        else:
+            st.session_state.export_stage = "results"
         st.rerun()
 
 
@@ -161,6 +197,10 @@ elif st.session_state.export_stage == "results":
                 st.caption(r["notes"])
 
             if not passed:
+                st.error(
+                    f"Failure reason: **{_failure_reason(r)}**",
+                    icon="🔍",
+                )
                 st.warning(
                     "A failed block is itself evidence of tampering — it should not be "
                     "silently excluded. Include it clearly marked as failed, or exclude it.",

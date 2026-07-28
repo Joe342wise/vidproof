@@ -115,5 +115,27 @@ try:
         """
         st.markdown(table_html, unsafe_allow_html=True)
 
+        # -----------------------------------------------------------------
+        # Block selection + Export button
+        # -----------------------------------------------------------------
+        st.divider()
+        all_ids = [item["evidenceId"] for item in items]
+
+        selected_ids = st.multiselect(
+            "Select blocks to export",
+            options=all_ids,
+            placeholder="Choose one or more evidence blocks…",
+        )
+
+        export_disabled = len(selected_ids) == 0
+        if st.button(
+            "Export Selected",
+            type="primary",
+            disabled=export_disabled,
+            help="Select at least one block above to enable export.",
+        ):
+            st.session_state.export_preselected = selected_ids
+            st.switch_page("pages/7_Export.py")
+
 except Exception as exc:
     st.error(f"Could not load evidence: {exc}")

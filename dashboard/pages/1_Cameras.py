@@ -106,6 +106,8 @@ def _status(last_ts: str | None) -> tuple[str, str, str]:
     age = datetime.now(timezone.utc) - ts
     if age < timedelta(minutes=5):
         return "Recording", "#16a34a", "🟢"
+    if age > timedelta(hours=24):
+        return "Unreachable", "#b45309", "🟠"
     return "Off", "#475569", "⚫"
 
 
@@ -185,7 +187,12 @@ st.markdown(_CARD_CSS, unsafe_allow_html=True)
 
 def _card_html(cam: dict, stats: dict) -> str:
     label, colour, _dot = _status(stats["last_ts"])
-    badge_bg = {"Recording": "#14532d", "Off": "#1e293b", "Error": "#450a0a"}.get(label, "#1e293b")
+    badge_bg = {
+        "Recording":   "#14532d",
+        "Off":         "#1e293b",
+        "Unreachable": "#431407",
+        "Error":       "#450a0a",
+    }.get(label, "#1e293b")
 
     enrolled = _fmt_ts(cam.get("enrollmentTimestamp"))
     last_block = _fmt_ts(stats["last_ts"])

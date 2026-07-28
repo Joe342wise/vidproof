@@ -108,6 +108,14 @@ Allow development and testing without the Raspberry Pi by treating a sample `.mp
 - The plaintext hash is valid only for the exact bytes passed into encryption.
 - The encrypted file hash is the long-term storage-integrity check.
 
+> **Design note — signature placement.** VidProof signs the plaintext block
+> hash before encryption. The encrypted video block is stored as ciphertext
+> only, while the device signature is stored in immutable evidence metadata
+> (`evidence.json`) and anchored in Hyperledger Fabric. The signature remains
+> part of the forensic proof even though it is not embedded inside the
+> encrypted video bytes. This keeps the decryption layer independent of the
+> authentication layer and allows signature verification without decrypting.
+
 ## 4. Pi-Mode Capture Algorithm
 
 ### Purpose

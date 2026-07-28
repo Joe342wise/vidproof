@@ -212,6 +212,14 @@ Evidence ID: `{eid}`
 This package was produced by VidProof and can be verified independently
 using standard tools (OpenSSL, Python 3).
 
+> **How authentication works in this package.**
+> VidProof signs the plaintext block hash *before* encryption. The encrypted
+> video block (`evidence/{eid}.enc`) is ciphertext only — the device signature
+> is stored separately in `metadata/evidence.json` and anchored in Hyperledger
+> Fabric. The signature is therefore verifiable without decrypting the video,
+> and decryption is independent of signature verification. Steps 1 and 2 below
+> can be performed in either order.
+
 ---
 
 ## 1. Verify Encrypted File Integrity

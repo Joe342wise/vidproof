@@ -7,6 +7,12 @@ from dashboard import api_client
 
 st.set_page_config(page_title="Verify — VidProof", layout="wide")
 st.title("Verify Evidence")
+st.caption(
+    "Hash check confirms the encrypted file is unaltered. "
+    "Signature check proves the footage came from the enrolled camera — "
+    "the device signature is stored in evidence metadata, not inside the encrypted video. "
+    "RFC 3161 timestamp proves when the event occurred."
+)
 
 # ---------------------------------------------------------------------------
 # Input
@@ -18,7 +24,7 @@ with col1:
 with col2:
     include_decryption = st.checkbox(
         "Include decryption check",
-        help="Requires owner.x25519.priv.pem to be present in storage/keys/ on the server",
+        help="Requires owner.x25519.priv.pem in storage/keys/ on the server",
     )
 
 run = st.button("Run Verification", type="primary", disabled=not evidence_id)
@@ -42,32 +48,43 @@ if run and evidence_id:
     result = response["result"]
     decision = result.get("primaryDecision", "UNKNOWN")
 
-    # Primary decision banner
     if decision == "PASS":
         st.success(f"PRIMARY DECISION: {decision}", icon="✅")
     else:
         st.error(f"PRIMARY DECISION: {decision}", icon="❌")
 
-    # Detail table
+    # ---------------------------------------------------------------------------
+    # Check results
+    # ---------------------------------------------------------------------------
     st.subheader("Check Results")
-    checks = {
-        "Encrypted file hash valid": result.get("encryptedFileHashValid"),
-        "Device signature valid": result.get("deviceSignatureValid"),
-        "Decryption attempted": result.get("decryptionAttempted"),
-        "Decryption valid": result.get("decryptionValid"),
-        "Plaintext hash matches evidence": result.get("plaintextHashMatchesEvidence"),
-        "PRNU checked": result.get("prnuChecked"),
-    }
-    for label, value in checks.items():
-        if value is True:
-            st.markdown(f"- **{label}:** ✅ Yes")
+
+    def _row(label: str, value, checked: bool = True) -> None:
+        if not checked:
+            st.markdown(f"- **{label}:** ⏭ skipped")
+        elif value is True:
+            st.markdown(f"- **{label}:** ✅ pass")
         elif value is False:
-            st.markdown(f"- **{label}:** ❌ No")
+            st.markdown(f"- **{label}:** ❌ FAIL")
         else:
             st.markdown(f"- **{label}:** —")
 
+    _row("Encrypted file hash", result.get("encryptedFileHashValid"))
+    _row("Device signature",    result.get("deviceSignatureValid"))
+    _row("Decryption",          result.get("decryptionValid"),
+         checked=result.get("decryptionAttempted", False))
+    _row("Plaintext hash match", result.get("plaintextHashMatchesEvidence"),
+         checked=result.get("decryptionAttempted", False))
+    _row("RFC 3161 timestamp",  result.get("tsaValid"),
+         checked=result.get("tsaChecked", False))
+    _row("PRNU",                result.get("prnuScore"),
+         checked=result.get("prnuChecked", False))
+
+    if result.get("tsaChecked") and result.get("tsaDetail"):
+        with st.expander("Timestamp detail"):
+            st.code(result["tsaDetail"])
+
     if result.get("prnuScore") is not None:
-        st.markdown(f"- **PRNU score:** {result['prnuScore']:.4f}")
+        st.markdown(f"- **PRNU score:** {result['prnuScore']:.4f} (secondary signal only)")
 
     st.caption(
         f"Verification ID: `{result.get('verificationId', '—')}` · "

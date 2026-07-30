@@ -113,7 +113,7 @@ if st.session_state.export_stage == "select":
         st.session_state.export_include = {eid: True for eid in selected}
 
         # If everything passed, skip results screen and package immediately
-        all_passed = all(
+        all_passed = bool(selected) and all(
             not r.get("_error") and r.get("primaryDecision") == "PASS"
             for r in verify_results.values()
         )

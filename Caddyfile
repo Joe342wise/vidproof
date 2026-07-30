@@ -1,0 +1,7 @@
+api.vidproof.adjarnor.dev {
+    reverse_proxy backend:8000
+}
+
+vidproof.adjarnor.dev {
+    reverse_proxy dashboard:8501
+}

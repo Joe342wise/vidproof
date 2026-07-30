@@ -10,6 +10,8 @@ from fastapi.responses import Response as RawResponse
 
 from backend.app.config import settings
 from backend.app.models import (
+    AttackDemoRequest,
+    AttackDemoResponse,
     BulkExportRequest,
     CaptureResponse,
     EvidenceRecord,
@@ -179,6 +181,26 @@ def verify_evidence(evidence_id: str, req: VerifyEvidenceRequest):
         raise HTTPException(status_code=500, detail=f"File I/O error: {exc}")
 
     return VerifyEvidenceResponse(ok=True, result=VerificationResult(**result))
+
+
+@router.post("/{evidence_id}/attack-demo", response_model=AttackDemoResponse)
+def attack_demo(evidence_id: str, req: AttackDemoRequest):
+    try:
+        result = verification_svc.run_attack_demo(
+            evidence_id=evidence_id,
+            attack_type=req.attackType,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"File I/O error: {exc}")
+
+    return AttackDemoResponse(
+        ok=True,
+        attackType=result["_attackType"],
+        attackDescription=result["_attackDescription"],
+        result=VerificationResult(**{k: v for k, v in result.items() if not k.startswith("_")}),
+    )
 
 
 @router.get("/{evidence_id}/verification-results", response_model=list[VerificationResult])

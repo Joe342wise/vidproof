@@ -86,6 +86,14 @@ def get_fabric_history(evidence_id: str) -> dict:
     return resp.json()
 
 
+def run_attack_demo(evidence_id: str, attack_type: str) -> dict:
+    resp = _session.post(_url(f"/evidence/{evidence_id}/attack-demo"), json={
+        "attackType": attack_type,
+    }, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
 def export_evidence(evidence_id: str) -> bytes:
     resp = _session.post(_url(f"/evidence/{evidence_id}/export"), timeout=60)
     resp.raise_for_status()

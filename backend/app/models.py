@@ -113,3 +113,14 @@ class VerificationResult(BaseModel):
 class VerifyEvidenceResponse(BaseModel):
     ok: bool
     result: VerificationResult
+
+
+class AttackDemoRequest(BaseModel):
+    attackType: str  # "bit_flip" | "forge_signature" | "metadata_injection"
+
+
+class AttackDemoResponse(BaseModel):
+    ok: bool
+    attackType: str
+    attackDescription: str
+    result: VerificationResult

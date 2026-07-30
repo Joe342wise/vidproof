@@ -31,8 +31,10 @@ def run_verify(
     owner_privkey_path: Path | None = None,
     verifier_id: str = "system",
     evidence_json_override: Path | None = None,
+    enc_path_override: Path | None = None,
     tsa_ca_cert: Path | None = None,
     tsa_cert: Path | None = None,
+    dry_run: bool = False,
 ) -> dict:
     # Resolve evidence.json path — override is for tamper testing only
     if evidence_json_override is not None:
@@ -54,7 +56,7 @@ def run_verify(
     except json.JSONDecodeError as exc:
         raise ValueError(f"camera.json is not valid JSON: {exc}") from exc
 
-    enc_path = storage_dir / "evidence" / f"{evidence_id}.enc"
+    enc_path = enc_path_override if enc_path_override is not None else storage_dir / "evidence" / f"{evidence_id}.enc"
 
     # Step 1: verify encrypted file integrity
     encrypted_file_hash_valid = False
@@ -180,11 +182,11 @@ def run_verify(
         "notes": " ".join(notes_parts) if notes_parts else "All primary checks passed.",
     }
 
-    # Write a new append-only verification result — never touch evidence.json
-    results_dir = storage_dir / "metadata" / "results"
-    results_dir.mkdir(parents=True, exist_ok=True)
-    result_path = results_dir / f"{verification_id}.json"
-    result_path.write_text(json.dumps(result, indent=2))
+    if not dry_run:
+        results_dir = storage_dir / "metadata" / "results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        result_path = results_dir / f"{verification_id}.json"
+        result_path.write_text(json.dumps(result, indent=2))
 
     return result
 

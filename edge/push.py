@@ -22,13 +22,14 @@ Exit codes: 0 = success, 1 = one or more items failed or queued.
 """
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 import requests
 
-_DEFAULT_BACKEND_URL = "http://vidproof-backend:8000"
+_DEFAULT_BACKEND_URL = os.environ.get("VIDPROOF_BACKEND_URL", "http://vidproof-backend:8000")
 _RETRY_DELAY_S = 30
 _MAX_RETRIES = 3
 _OUTBOX = "outbox"

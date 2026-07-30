@@ -3,19 +3,20 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from datetime import datetime, timezone
+import pandas as pd
 import streamlit as st
 from dashboard import api_client
 
 st.set_page_config(page_title="Verify — VidProof", layout="wide")
 st.title("Verify Evidence")
 st.caption(
-    "Select a block to inspect its metadata, then run verification. "
+    "Select one or more blocks below, then run verification. "
     "Hash check confirms the encrypted file is unaltered. "
     "Signature check proves the footage came from the enrolled camera."
 )
 
 # ---------------------------------------------------------------------------
-# Load evidence blocks
+# Load evidence
 # ---------------------------------------------------------------------------
 @st.cache_data(ttl=20)
 def _load_evidence():
@@ -30,128 +31,122 @@ if not evidence_list:
     st.info("No evidence blocks found. Capture some footage first.")
     st.stop()
 
+col_refresh, col_spacer = st.columns([1, 6])
+with col_refresh:
+    if st.button("Refresh", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
 # ---------------------------------------------------------------------------
-# Block selector
+# Checkbox table
 # ---------------------------------------------------------------------------
-def _fmt_option(e: dict) -> str:
-    ts = e.get("captureTimestamp", "")
+def _fmt_ts(ts: str) -> str:
     try:
         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        ts_fmt = dt.strftime("%Y-%m-%d %H:%M")
+        return dt.strftime("%Y-%m-%d %H:%M UTC")
     except Exception:
-        ts_fmt = ts[:16] if ts else "unknown"
-    eid = e.get("evidenceId", "")
-    short_id = eid[:18] + "…" if len(eid) > 18 else eid
-    return f"{e.get('cameraId', '?')}  ·  {ts_fmt}  ·  {short_id}"
+        return ts
 
-options = {_fmt_option(e): e for e in sorted(
-    evidence_list, key=lambda x: x.get("captureTimestamp", ""), reverse=True
-)}
+sorted_blocks = sorted(evidence_list, key=lambda x: x.get("captureTimestamp", ""), reverse=True)
 
-selected_label = st.selectbox(
-    "Evidence block",
-    options=list(options.keys()),
-    index=0,
+df = pd.DataFrame([{
+    "Select": False,
+    "Camera": e.get("cameraId", ""),
+    "Evidence ID": e.get("evidenceId", ""),
+    "Captured": _fmt_ts(e.get("captureTimestamp", "")),
+    "Fabric Tx": "✓" if e.get("fabricTxId") else "—",
+} for e in sorted_blocks])
+
+col_selall, col_btn, col_dec, col_vid = st.columns([1, 2, 2, 2])
+with col_selall:
+    select_all = st.checkbox("Select all", key="sel_all")
+
+if select_all:
+    df["Select"] = True
+
+edited = st.data_editor(
+    df,
+    column_config={
+        "Select": st.column_config.CheckboxColumn("", width="small"),
+        "Camera": st.column_config.TextColumn("Camera", width="small"),
+        "Evidence ID": st.column_config.TextColumn("Evidence ID", width="medium"),
+        "Captured": st.column_config.TextColumn("Captured", width="medium"),
+        "Fabric Tx": st.column_config.TextColumn("Fabric", width="small"),
+    },
+    hide_index=True,
+    use_container_width=True,
+    key="verify_table",
 )
-block = options[selected_label]
-evidence_id = block["evidenceId"]
 
-# ---------------------------------------------------------------------------
-# Metadata card
-# ---------------------------------------------------------------------------
-def _trunc(s: str, n: int = 24) -> str:
-    return s[:n] + "…" if len(s) > n else s
+selected_ids = [
+    row["Evidence ID"]
+    for _, row in edited.iterrows()
+    if row["Select"]
+]
 
-st.markdown(f"""
-<div style="
-  border:1px solid #334155;border-radius:10px;padding:18px 24px;
-  background:#0f172a;font-family:sans-serif;color:#e2e8f0;
-  margin:12px 0 20px;
-">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
-    <div>
-      <div style="font-size:0.72em;color:#64748b;text-transform:uppercase;letter-spacing:.07em">Evidence ID</div>
-      <div style="font-family:monospace;color:#38bdf8;font-size:0.92em;margin-top:2px">{block.get('evidenceId','—')}</div>
-    </div>
-    <div>
-      <div style="font-size:0.72em;color:#64748b;text-transform:uppercase;letter-spacing:.07em">Camera</div>
-      <div style="color:#f1f5f9;font-size:0.92em;font-weight:600;margin-top:2px">{block.get('cameraId','—')}</div>
-    </div>
-    <div>
-      <div style="font-size:0.72em;color:#64748b;text-transform:uppercase;letter-spacing:.07em">Captured</div>
-      <div style="color:#f1f5f9;font-size:0.92em;margin-top:2px">{block.get('captureTimestamp','—')}</div>
-    </div>
-  </div>
-  <div style="border-top:1px solid #1e293b;margin-top:14px;padding-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
-    <div>
-      <div style="font-size:0.7em;color:#64748b;text-transform:uppercase;letter-spacing:.07em">Encrypted File Hash</div>
-      <div style="font-family:monospace;font-size:0.8em;color:#94a3b8;margin-top:2px">{_trunc(block.get('encryptedFileHash','—'), 40)}</div>
-    </div>
-    <div>
-      <div style="font-size:0.7em;color:#64748b;text-transform:uppercase;letter-spacing:.07em">Plaintext Hash</div>
-      <div style="font-family:monospace;font-size:0.8em;color:#94a3b8;margin-top:2px">{_trunc(block.get('plaintextHash','—'), 40)}</div>
-    </div>
-    <div>
-      <div style="font-size:0.7em;color:#64748b;text-transform:uppercase;letter-spacing:.07em">Device Signature</div>
-      <div style="font-family:monospace;font-size:0.8em;color:#94a3b8;margin-top:2px">{_trunc(block.get('deviceSignature','—'), 40)}</div>
-    </div>
-    <div>
-      <div style="font-size:0.7em;color:#64748b;text-transform:uppercase;letter-spacing:.07em">Fabric Tx</div>
-      <div style="font-family:monospace;font-size:0.8em;color:#94a3b8;margin-top:2px">{_trunc(block.get('fabricTxId','') or '—', 40)}</div>
-    </div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+n = len(selected_ids)
 
-# ---------------------------------------------------------------------------
-# Verify controls
-# ---------------------------------------------------------------------------
-col_vid, col_dec, col_btn = st.columns([2, 2, 1])
-with col_vid:
-    verifier_id = st.text_input("Verifier ID", value="operator", label_visibility="visible")
 with col_dec:
     include_decryption = st.checkbox(
-        "Include decryption check",
+        "Include decryption",
         help="Requires owner.x25519.priv.pem in storage/keys/ on the server",
     )
+with col_vid:
+    verifier_id = st.text_input("Verifier ID", value="operator", label_visibility="visible")
 with col_btn:
     st.write("")
-    run = st.button("Run Verification", type="primary", use_container_width=True)
+    run = st.button(
+        f"Verify {n} block{'s' if n != 1 else ''}" if n else "Verify",
+        type="primary",
+        disabled=(n == 0),
+        use_container_width=True,
+    )
+
+if n == 0 and not run:
+    st.caption("Select at least one block to verify.")
+    st.stop()
 
 if not run:
     st.stop()
 
 # ---------------------------------------------------------------------------
-# Run
+# Run verification for each selected block
 # ---------------------------------------------------------------------------
-with st.spinner("Verifying…"):
+st.divider()
+st.subheader(f"Results — {n} block{'s' if n != 1 else ''}")
+
+progress = st.progress(0, text="Starting…")
+results: dict[str, dict] = {}
+
+for i, eid in enumerate(selected_ids):
+    progress.progress(i / n, text=f"Verifying {eid} ({i + 1}/{n})…")
     try:
-        response = api_client.verify_evidence(
-            evidence_id=evidence_id,
+        resp = api_client.verify_evidence(
+            evidence_id=eid,
             verifier_id=verifier_id.strip() or "operator",
             include_decryption=include_decryption,
         )
+        results[eid] = resp.get("result", {}) if resp.get("ok") else {"_error": resp.get("detail", "failed")}
     except Exception as exc:
-        st.error(f"Request failed: {exc}")
-        st.stop()
+        results[eid] = {"_error": str(exc)}
 
-if not response.get("ok"):
-    st.error(response.get("detail", "Verification request failed"))
-    st.stop()
-
-result = response["result"]
-decision = result.get("primaryDecision", "UNKNOWN")
-
-if decision == "PASS":
-    st.success(f"PRIMARY DECISION: **{decision}**", icon="✅")
-else:
-    st.error(f"PRIMARY DECISION: **{decision}**", icon="❌")
+progress.progress(1.0, text="Done.")
 
 # ---------------------------------------------------------------------------
-# Results grid
+# Summary bar
 # ---------------------------------------------------------------------------
-st.subheader("Check Results")
+n_pass = sum(1 for r in results.values() if r.get("primaryDecision") == "PASS")
+n_fail = sum(1 for r in results.values() if r.get("primaryDecision") == "FAIL")
+n_err  = sum(1 for r in results.values() if "_error" in r)
 
+c1, c2, c3 = st.columns(3)
+c1.metric("Passed", n_pass)
+c2.metric("Failed", n_fail)
+c3.metric("Errors", n_err)
+
+# ---------------------------------------------------------------------------
+# Per-block expandable results
+# ---------------------------------------------------------------------------
 def _cell(label: str, value, checked: bool = True) -> str:
     if not checked:
         icon, colour, bg = "⏭", "#94a3b8", "#1e293b"
@@ -165,39 +160,47 @@ def _cell(label: str, value, checked: bool = True) -> str:
     else:
         icon, colour, bg = "—", "#64748b", "#1e293b"
         status = "—"
-    return f"""
-<div style="border:1px solid {colour}30;border-radius:8px;padding:14px 16px;background:{bg};">
-  <div style="font-size:0.72em;color:#64748b;text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">{label}</div>
-  <div style="font-size:1.3em">{icon} <span style="color:{colour};font-weight:600;font-size:0.75em">{status}</span></div>
-</div>"""
+    return (
+        f"<div style='border:1px solid {colour}30;border-radius:8px;padding:12px 14px;background:{bg};'>"
+        f"<div style='font-size:0.7em;color:#64748b;text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px'>{label}</div>"
+        f"<div style='font-size:1.2em'>{icon} <span style='color:{colour};font-weight:600;font-size:0.72em'>{status}</span></div>"
+        f"</div>"
+    )
 
-checks = [
-    ("Encrypted file hash",    result.get("encryptedFileHashValid"),       True),
-    ("Device signature",       result.get("deviceSignatureValid"),          True),
-    ("Decryption",             result.get("decryptionValid"),               result.get("decryptionAttempted", False)),
-    ("Plaintext hash match",   result.get("plaintextHashMatchesEvidence"),  result.get("decryptionAttempted", False)),
-    ("RFC 3161 timestamp",     result.get("tsaValid"),                      result.get("tsaChecked", False)),
-    ("PRNU",                   result.get("prnuScore"),                     result.get("prnuChecked", False)),
-]
+for eid in selected_ids:
+    r = results.get(eid, {})
+    err = r.get("_error")
+    decision = r.get("primaryDecision", "ERROR" if err else "?")
+    icon = "✅" if decision == "PASS" else "❌"
 
-cols_html = "".join(_cell(lbl, val, chk) for lbl, val, chk in checks)
-st.markdown(
-    f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">{cols_html}</div>',
-    unsafe_allow_html=True,
-)
+    with st.expander(f"{icon}  {eid}  —  {decision}", expanded=(decision != "PASS")):
+        if err:
+            st.error(f"Verification error: {err}")
+            continue
 
-if result.get("tsaChecked") and result.get("tsaDetail"):
-    with st.expander("Timestamp detail"):
-        st.code(result["tsaDetail"])
+        checks = [
+            ("Encrypted file hash",   r.get("encryptedFileHashValid"),       True),
+            ("Device signature",      r.get("deviceSignatureValid"),          True),
+            ("Decryption",            r.get("decryptionValid"),               r.get("decryptionAttempted", False)),
+            ("Plaintext hash match",  r.get("plaintextHashMatchesEvidence"),  r.get("decryptionAttempted", False)),
+            ("RFC 3161 timestamp",    r.get("tsaValid"),                      r.get("tsaChecked", False)),
+            ("PRNU",                  r.get("prnuScore"),                     r.get("prnuChecked", False)),
+        ]
+        cells_html = "".join(_cell(lbl, val, chk) for lbl, val, chk in checks)
+        st.markdown(
+            f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">{cells_html}</div>',
+            unsafe_allow_html=True,
+        )
 
-if result.get("prnuScore") is not None:
-    st.caption(f"PRNU score: {result['prnuScore']:.4f} (secondary signal only — never a pass/fail gate)")
+        if r.get("notes"):
+            st.info(r["notes"])
 
-if result.get("notes"):
-    st.info(result["notes"])
+        if r.get("tsaChecked") and r.get("tsaDetail"):
+            with st.expander("Timestamp detail"):
+                st.code(r["tsaDetail"])
 
-st.caption(
-    f"Verification ID: `{result.get('verificationId','—')}` · "
-    f"Verified at: `{result.get('verifiedAt','—')}` · "
-    f"Verifier: `{result.get('verifierId','—')}`"
-)
+        st.caption(
+            f"Verification ID: `{r.get('verificationId','—')}` · "
+            f"Verified at: `{r.get('verifiedAt','—')}` · "
+            f"Verifier: `{r.get('verifierId','—')}`"
+        )

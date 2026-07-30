@@ -294,6 +294,26 @@ for row_start in range(0, len(cameras), COLS_PER_ROW):
                 else:
                     st.warning("Public key not available in camera record.")
 
+            with st.expander("Remove camera"):
+                cam_id = cam["cameraId"]
+                confirmed = st.checkbox(
+                    f"I understand this removes `{cam_id}` from VidProof permanently",
+                    key=f"confirm_del_{cam_id}",
+                )
+                if st.button(
+                    "Delete camera",
+                    key=f"del_{cam_id}",
+                    type="primary",
+                    disabled=not confirmed,
+                ):
+                    try:
+                        api_client.delete_camera(cam_id)
+                        st.success(f"Camera `{cam_id}` removed.")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Delete failed: {exc}")
+
     # pad empty column in an odd-count last row
     if len(row_cameras) < COLS_PER_ROW:
         with cols[len(row_cameras)]:

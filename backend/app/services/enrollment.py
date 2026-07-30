@@ -63,6 +63,17 @@ def list_cameras() -> list[dict]:
     return cameras
 
 
+def delete_camera(camera_id: str) -> None:
+    """Delete a camera record and its local private key. Raises ValueError if not found."""
+    path = settings.cameras_dir / f"{camera_id}.json"
+    if not path.exists():
+        raise ValueError(f"Camera '{camera_id}' not found")
+    path.unlink()
+    privkey = settings.keys_dir / f"{camera_id}.private.pem"
+    if privkey.exists():
+        privkey.unlink()
+
+
 def get_camera(camera_id: str) -> dict | None:
     """Return a single camera record or None if not found."""
     path = settings.cameras_dir / f"{camera_id}.json"

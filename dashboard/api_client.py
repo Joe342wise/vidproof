@@ -39,6 +39,11 @@ def get_camera(camera_id: str) -> dict:
     return resp.json()
 
 
+def delete_camera(camera_id: str) -> None:
+    resp = _session.delete(_url(f"/camera/{camera_id}"), timeout=10)
+    resp.raise_for_status()
+
+
 # ---------------------------------------------------------------------------
 # Evidence
 # ---------------------------------------------------------------------------

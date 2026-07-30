@@ -44,3 +44,11 @@ def get_camera(camera_id: str):
     if record is None:
         raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
     return record
+
+
+@router.delete("/{camera_id}", status_code=204)
+def delete_camera(camera_id: str):
+    try:
+        enrollment_svc.delete_camera(camera_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))

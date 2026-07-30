@@ -1,0 +1,13 @@
+{
+    "ROS2.distro": "jazzy",
+    "python.autoComplete.extraPaths": [
+        "/home/bc/Documents/Projects/fyp/ROS/aiear_ws/install/micro_ros_msgs/lib/python3.12/site-packages",
+        "/home/bc/Documents/Projects/fyp/ROS/aiear_ws/install/drive_base_msgs/lib/python3.12/site-packages",
+        "/opt/ros/jazzy/lib/python3.12/site-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/bc/Documents/Projects/fyp/ROS/aiear_ws/install/micro_ros_msgs/lib/python3.12/site-packages",
+        "/home/bc/Documents/Projects/fyp/ROS/aiear_ws/install/drive_base_msgs/lib/python3.12/site-packages",
+        "/opt/ros/jazzy/lib/python3.12/site-packages"
+    ]
+}

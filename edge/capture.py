@@ -91,7 +91,7 @@ def get_video_segment_pi_mode(duration: int = 10) -> bytes:
 
     cam = Picamera2()
     cam.configure(cam.create_video_configuration(main={"size": (1280, 720)}))
-    encoder = H264Encoder()
+    encoder = H264Encoder(bitrate=4_000_000)
 
     fd, tmp = tempfile.mkstemp(suffix=".h264")
     os.close(fd)

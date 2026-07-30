@@ -106,6 +106,7 @@ class VerificationResult(BaseModel):
     tsaValid: bool | None = None
     tsaDetail: str | None = None
     primaryDecision: str
+    failedChecks: list[str] = []
     notes: str
 
 

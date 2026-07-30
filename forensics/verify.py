@@ -124,7 +124,32 @@ def run_verify(
         if not tsa_valid:
             notes_parts.append(f"RFC 3161 timestamp verification failed: {tsa_detail}")
 
-    primary_decision = "PASS" if encrypted_file_hash_valid and device_signature_valid else "FAIL"
+    # Overall decision.
+    #
+    # Mandatory gates are always evaluated. Conditional gates bind only when the
+    # corresponding check actually ran — a check that was skipped is reported as
+    # unchecked, never as a failure. This stops records ingested before a
+    # capability existed (e.g. no TSA running) from becoming retroactive
+    # failures, while ensuring a check that ran and failed can never be
+    # reported as an overall pass.
+    failed_checks: list[str] = []
+
+    if not encrypted_file_hash_valid:
+        failed_checks.append("encryptedFileHash")
+    if not device_signature_valid:
+        failed_checks.append("deviceSignature")
+
+    if decryption_attempted:
+        if not decryption_valid:
+            failed_checks.append("decryption")
+        elif not plaintext_hash_matches_evidence:
+            # Only a distinct failure when decryption itself succeeded.
+            failed_checks.append("plaintextHashMatch")
+
+    if tsa_checked and not tsa_valid:
+        failed_checks.append("tsaToken")
+
+    primary_decision = "FAIL" if failed_checks else "PASS"
 
     if not encrypted_file_hash_valid:
         notes_parts.append("Encrypted file hash mismatch — ciphertext may be tampered.")
@@ -151,6 +176,7 @@ def run_verify(
         "tsaValid": tsa_valid,
         "tsaDetail": tsa_detail,
         "primaryDecision": primary_decision,
+        "failedChecks": failed_checks,
         "notes": " ".join(notes_parts) if notes_parts else "All primary checks passed.",
     }
 

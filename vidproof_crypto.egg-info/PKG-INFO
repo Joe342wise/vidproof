@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: vidproof-crypto
+Version: 0.1.0
+Summary: VidProof shared cryptographic primitives (Ed25519, AES-256-GCM, X25519 key wrapping)
+Requires-Python: >=3.11
+Requires-Dist: cryptography>=42.0.0

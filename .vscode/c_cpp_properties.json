@@ -1,0 +1,25 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/bc/Documents/Projects/fyp/ROS/aiear_ws/install/ros2_control_demo_example_2/include/**",
+        "/home/bc/Documents/Projects/fyp/ROS/aiear_ws/install/micro_ros_agent/include/**",
+        "/home/bc/Documents/Projects/fyp/ROS/aiear_ws/install/micro_ros_msgs/include/**",
+        "/home/bc/Documents/Projects/fyp/ROS/aiear_ws/install/drive_base_msgs/include/**",
+        "/home/bc/Documents/Projects/fyp/ROS/aiear_ws/install/aiear_hardware/include/**",
+        "/opt/ros/jazzy/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ros2",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++17"
+    }
+  ],
+  "version": 4
+}

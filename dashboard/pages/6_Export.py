@@ -344,7 +344,12 @@ elif st.session_state.export_stage == "done":
     )
 
     date_str  = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    filename  = f"vidproof-{len(included)}block{'s' if len(included) != 1 else ''}-{date_str}.zip"
+    # Build a descriptive filename: camera IDs + block count + date
+    cam_ids   = sorted({emap[e]["cameraId"] for e in included if e in emap and emap[e].get("cameraId")})
+    cam_part  = "-".join(cam_ids) if cam_ids else "unknown"
+    n         = len(included)
+    block_part = f"{n}block{'s' if n != 1 else ''}"
+    filename  = f"vidproof-{cam_part}-{block_part}-{date_str}.zip"
 
     st.download_button(
         label=f"Download {filename}",

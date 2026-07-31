@@ -422,5 +422,5 @@ def export_evidence_package(evidence_id: str, body: ExportRequest = ExportReques
     return RawResponse(
         content=zip_bytes,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{evidence_id}.zip"'},
+        headers={"Content-Disposition": f'attachment; filename="vidproof-{evidence_id}.zip"'},
     )

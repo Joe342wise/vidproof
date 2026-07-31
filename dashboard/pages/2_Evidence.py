@@ -163,16 +163,16 @@ if flip:
 # ---------------------------------------------------------------------------
 rows = []
 for item in items:
-    eid  = item.get("evidenceId", "")
-    cam  = item.get("cameraId", "")
-    ts   = item.get("captureTimestamp", "")
+    eid   = item.get("evidenceId", "")
+    cam   = item.get("cameraId", "")
+    ts    = item.get("captureTimestamp", "")
     fhash = item.get("encryptedFileHash", "")
-    tx   = item.get("fabricTxId", "")
-    st   = statuses.get(eid, "Unknown")
+    tx    = item.get("fabricTxId", "")
+    vstatus = statuses.get(eid, "Unknown")
 
     if search and search not in eid.lower() and search not in cam.lower():
         continue
-    if status_filter != "All statuses" and st != status_filter:
+    if status_filter != "All statuses" and vstatus != status_filter:
         continue
 
     rows.append({
@@ -181,7 +181,7 @@ for item in items:
         "captureTimestamp": ts,
         "encryptedFileHash": fhash,
         "fabricTxId": tx,
-        "_status": st,
+        "_status": vstatus,
     })
 
 # Sort

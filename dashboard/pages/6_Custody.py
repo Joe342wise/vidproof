@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -7,6 +8,13 @@ from datetime import datetime
 
 import streamlit as st
 from dashboard import api_client
+
+
+def _to_html(text: str) -> str:
+    """Convert **bold** and `code` spans to HTML for embedding inside raw HTML blocks."""
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'`([^`]+)`', r'<code style="font-size:0.85em;background:#1e293b;padding:1px 4px;border-radius:3px">\1</code>', text)
+    return text
 
 st.set_page_config(page_title="Chain of Custody — VidProof", layout="wide")
 st.title("Chain of Custody")
@@ -516,7 +524,7 @@ for i, entry in enumerate(full_history):
   <div class="custody-card {card_class}">
     <div class="custody-ts">{ts}</div>
     <div class="custody-title">{title}{badge}</div>
-    <div class="custody-summary">{summary_text}</div>
+    <div class="custody-summary">{_to_html(summary_text)}</div>
   </div>
 </div>""")
 

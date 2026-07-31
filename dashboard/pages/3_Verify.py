@@ -165,15 +165,6 @@ def _cell(label: str, value, checked: bool = True, skip_reason: str = "") -> str
     if not checked:
         icon, colour, bg = "⏭", "#94a3b8", "#1e293b"
         status = skip_reason or "skipped"
-    elif isinstance(value, float):
-        score_str = f"{value:.3f}"
-        if value >= 0.5:
-            icon, colour, bg = "✅", "#4ade80", "#052e16"
-        elif value >= 0.3:
-            icon, colour, bg = "⚠", "#facc15", "#422006"
-        else:
-            icon, colour, bg = "❌", "#f87171", "#450a0a"
-        status = score_str
     elif value is True:
         icon, colour, bg = "✅", "#4ade80", "#052e16"
         status = "pass"
@@ -205,26 +196,16 @@ for eid in selected_ids:
         if not r.get("tsaChecked"):
             tsa_skip = "no token" if not r.get("tsaTokenRef") else "certs missing"
 
-        prnu_skip = ""
-        if not r.get("prnuChecked"):
-            if not r.get("decryptionAttempted"):
-                prnu_skip = "not decrypted"
-            elif not r.get("decryptionValid"):
-                prnu_skip = "decryption failed"
-            else:
-                prnu_skip = "no reference"
-
         checks = [
             ("Encrypted file hash",   r.get("encryptedFileHashValid"),       True,                                ""),
             ("Device signature",      r.get("deviceSignatureValid"),          True,                                ""),
             ("Decryption",            r.get("decryptionValid"),               r.get("decryptionAttempted", False), "not requested"),
             ("Plaintext hash match",  r.get("plaintextHashMatchesEvidence"),  r.get("decryptionAttempted", False), "not requested"),
             ("RFC 3161 timestamp",    r.get("tsaValid"),                      r.get("tsaChecked", False),          tsa_skip),
-            ("PRNU fingerprint",      r.get("prnuScore"),                     r.get("prnuChecked", False),         prnu_skip),
         ]
         cells_html = "".join(_cell(lbl, val, chk, reason) for lbl, val, chk, reason in checks)
         st.markdown(
-            f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">{cells_html}</div>',
+            f'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:10px">{cells_html}</div>',
             unsafe_allow_html=True,
         )
 

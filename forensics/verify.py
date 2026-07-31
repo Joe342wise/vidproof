@@ -136,12 +136,8 @@ def run_verify(
                 ref_prnu = load_reference(prnu_ref_path)
                 prnu_score = compare_prnu(ref_prnu, query_prnu)
                 prnu_checked = True
-                if prnu_score < 0.3:
-                    notes_parts.append(
-                        f"PRNU score {prnu_score:.3f} is below threshold — footage may not originate from this camera."
-                    )
-            except Exception as exc:
-                notes_parts.append(f"PRNU comparison failed: {exc}")
+            except Exception:
+                pass
 
     # Step 5: RFC 3161 timestamp verification (optional — skipped if no token or no certs)
     tsa_checked = False

@@ -29,20 +29,49 @@ st.title("Cameras")
 # Enroll form
 # ---------------------------------------------------------------------------
 with st.expander("Enroll a new camera", expanded=False):
+    # Pre-fetch the owner public key so the operator doesn't need to type it manually
+    server_owner_key = api_client.get_owner_public_key()
+
+    if server_owner_key:
+        st.success("Owner X25519 public key loaded from server.", icon="🔑")
+    else:
+        st.warning(
+            "No owner X25519 keypair found on this server. "
+            "Generate one first with the command in the setup guide, then refresh.",
+            icon="⚠️",
+        )
+
     with st.form("enroll_form"):
-        camera_id_in = st.text_input("Camera ID", placeholder="cam-001")
+        camera_id_in  = st.text_input("Camera ID", placeholder="cam-01")
         device_serial = st.text_input("Device Serial", placeholder="SN123456")
-        operator_id = st.text_input("Operator ID", placeholder="alice")
-        owner_public_key = st.text_area(
-            "Owner Public Key (base64 X25519)",
-            placeholder="Paste base64-encoded X25519 public key here",
+        operator_id   = st.text_input("Operator ID", placeholder="alice")
+
+        st.markdown("---")
+        st.markdown("**Device signing key**")
+        st.caption(
+            "The camera device should generate its own Ed25519 keypair and give you only the "
+            "public key. Paste it here. If left blank the server generates a keypair instead "
+            "(less secure — the private key will reside on the server)."
+        )
+        device_pub_key = st.text_area(
+            "Device Ed25519 Public Key (base64, 32 bytes)",
+            placeholder="Paste the Pi's Ed25519 public key here — leave blank to generate server-side",
             height=80,
         )
-        submitted = st.form_submit_button("Enroll")
+
+        st.markdown("**Owner decryption key**")
+        st.caption("X25519 public key used to wrap the per-evidence AES key. Auto-filled from the server.")
+        owner_public_key = st.text_area(
+            "Owner Public Key (base64 X25519)",
+            value=server_owner_key or "",
+            height=80,
+        )
+
+        submitted = st.form_submit_button("Enroll", disabled=not server_owner_key)
 
     if submitted:
         if not all([camera_id_in, device_serial, operator_id, owner_public_key]):
-            st.error("All fields are required.")
+            st.error("Camera ID, Device Serial, Operator ID, and Owner Public Key are required.")
         else:
             with st.spinner("Enrolling…"):
                 try:
@@ -51,13 +80,37 @@ with st.expander("Enroll a new camera", expanded=False):
                         device_serial=device_serial.strip(),
                         operator_id=operator_id.strip(),
                         owner_public_key=owner_public_key.strip(),
+                        device_public_key=device_pub_key.strip() or None,
                     )
                     if result.get("ok"):
                         st.success(f"Enrolled **{result['cameraId']}**")
-                        st.info(f"Private key: `{result['privateKeyPath']}`")
-                        st.info(f"Camera record: `{result['cameraJsonPath']}`")
 
-                        # Pairing QR code — scan to trust this camera
+                        if result.get("privateKeyPath"):
+                            st.warning(
+                                f"Server-generated private key stored at `{result['privateKeyPath']}`. "
+                                "Copy it to the device — it cannot be retrieved later.",
+                                icon="⚠️",
+                            )
+                        else:
+                            st.info("Device supplied its own public key — no private key on server.", icon="✅")
+
+                        # Download the camera record to copy to the Pi
+                        import json as _json
+                        cam_record = api_client.get_camera(result["cameraId"])
+                        cam_json_bytes = _json.dumps(cam_record, indent=2).encode()
+                        st.markdown("**Copy this record to the Pi**")
+                        st.caption(
+                            f"Save to `/etc/vidproof/cameras/{result['cameraId']}.json` on the device "
+                            "so it uses the correct `ownerPublicKey` for AES key wrapping."
+                        )
+                        st.download_button(
+                            f"Download {result['cameraId']}.json",
+                            data=cam_json_bytes,
+                            file_name=f"{result['cameraId']}.json",
+                            mime="application/json",
+                        )
+
+                        # Pairing QR code
                         qr_png = _make_qr_png(
                             camera_id=result["cameraId"],
                             public_key=result.get("publicKeyEd25519", ""),

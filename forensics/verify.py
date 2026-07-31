@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import secrets
 import sys
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ def run_verify(
     tsa_ca_cert: Path | None = None,
     tsa_cert: Path | None = None,
     dry_run: bool = False,
+    override_public_key_b64: str | None = None,
 ) -> dict:
     # Resolve evidence.json path — override is for tamper testing only
     if evidence_json_override is not None:
@@ -67,12 +69,21 @@ def run_verify(
         encrypted_file_hash_valid = False
 
     # Step 2: verify device signature
+    # The override key lets an independent verifier supply the key directly
+    # (e.g. from a QR code scan) rather than trusting the enrolled record.
+    public_key_source = "enrolled"
+    if override_public_key_b64 is not None:
+        sig_public_key = override_public_key_b64
+        public_key_source = "override"
+    else:
+        sig_public_key = camera.get("publicKeyEd25519", "")
+
     device_signature_valid = False
     try:
         device_signature_valid = verify_ed25519_signature(
             hash_hex=evidence["plaintextHash"],
             signature_b64=evidence["deviceSignature"],
-            public_key_b64=camera["publicKeyEd25519"],
+            public_key_b64=sig_public_key,
         )
     except (ValueError, KeyError):
         device_signature_valid = False
@@ -134,24 +145,26 @@ def run_verify(
     # capability existed (e.g. no TSA running) from becoming retroactive
     # failures, while ensuring a check that ran and failed can never be
     # reported as an overall pass.
-    failed_checks: list[str] = []
-
+    # Primary decision: hash + signature only (per system design in CLAUDE.md).
+    # Decryption and TSA are secondary checks — their failures are recorded in
+    # failedChecks for transparency but do not change primaryDecision.
+    primary_failed: list[str] = []
     if not encrypted_file_hash_valid:
-        failed_checks.append("encryptedFileHash")
+        primary_failed.append("encryptedFileHash")
     if not device_signature_valid:
-        failed_checks.append("deviceSignature")
+        primary_failed.append("deviceSignature")
 
+    secondary_failed: list[str] = []
     if decryption_attempted:
         if not decryption_valid:
-            failed_checks.append("decryption")
+            secondary_failed.append("decryption")
         elif not plaintext_hash_matches_evidence:
-            # Only a distinct failure when decryption itself succeeded.
-            failed_checks.append("plaintextHashMatch")
-
+            secondary_failed.append("plaintextHashMatch")
     if tsa_checked and not tsa_valid:
-        failed_checks.append("tsaToken")
+        secondary_failed.append("tsaToken")
 
-    primary_decision = "FAIL" if failed_checks else "PASS"
+    failed_checks = primary_failed + secondary_failed
+    primary_decision = "FAIL" if primary_failed else "PASS"
 
     if not encrypted_file_hash_valid:
         notes_parts.append("Encrypted file hash mismatch — ciphertext may be tampered.")
@@ -166,6 +179,7 @@ def run_verify(
         "evidenceId": evidence_id,
         "verifiedAt": verified_at,
         "verifierId": verifier_id,
+        "publicKeySource": public_key_source,
         "encryptedFileHashValid": encrypted_file_hash_valid,
         "deviceSignatureValid": device_signature_valid,
         "decryptionAttempted": decryption_attempted,
@@ -187,6 +201,7 @@ def run_verify(
         results_dir.mkdir(parents=True, exist_ok=True)
         result_path = results_dir / f"{verification_id}.json"
         result_path.write_text(json.dumps(result, indent=2))
+        os.chmod(result_path, 0o444)
 
     return result
 

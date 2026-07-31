@@ -18,13 +18,32 @@ def health() -> dict:
 # Cameras
 # ---------------------------------------------------------------------------
 
-def enroll_camera(camera_id: str, device_serial: str, operator_id: str, owner_public_key: str) -> dict:
-    return _session.post(_url("/camera/enroll"), json={
+def get_owner_public_key() -> str | None:
+    """Return the server's owner X25519 public key as base64, or None if not configured."""
+    try:
+        resp = _session.get(_url("/camera/owner-public-key"), timeout=5)
+        data = resp.json()
+        return data.get("ownerPublicKey") if data.get("ok") else None
+    except Exception:
+        return None
+
+
+def enroll_camera(
+    camera_id: str,
+    device_serial: str,
+    operator_id: str,
+    owner_public_key: str,
+    device_public_key: str | None = None,
+) -> dict:
+    payload: dict = {
         "cameraId": camera_id,
         "deviceSerial": device_serial,
         "operatorId": operator_id,
         "ownerPublicKey": owner_public_key,
-    }, timeout=10).json()
+    }
+    if device_public_key:
+        payload["devicePublicKeyEd25519"] = device_public_key
+    return _session.post(_url("/camera/enroll"), json=payload, timeout=10).json()
 
 
 def list_cameras() -> list[dict]:
@@ -71,11 +90,16 @@ def list_evidence() -> list[dict]:
 # Verification
 # ---------------------------------------------------------------------------
 
-def verify_evidence(evidence_id: str, verifier_id: str = "system", include_decryption: bool = False) -> dict:
-    resp = _session.post(_url(f"/evidence/{evidence_id}/verify"), json={
-        "verifierId": verifier_id,
-        "includeDecryption": include_decryption,
-    }, timeout=30)
+def verify_evidence(
+    evidence_id: str,
+    verifier_id: str = "system",
+    include_decryption: bool = False,
+    override_public_key: str | None = None,
+) -> dict:
+    payload: dict = {"verifierId": verifier_id, "includeDecryption": include_decryption}
+    if override_public_key:
+        payload["overridePublicKeyEd25519"] = override_public_key
+    resp = _session.post(_url(f"/evidence/{evidence_id}/verify"), json=payload, timeout=30)
     return resp.json()
 
 
@@ -99,16 +123,35 @@ def run_attack_demo(evidence_id: str, attack_type: str) -> dict:
     return resp.json()
 
 
-def export_evidence(evidence_id: str) -> bytes:
-    resp = _session.post(_url(f"/evidence/{evidence_id}/export"), timeout=60)
+def verify_package(zip_bytes: bytes, filename: str = "package.zip") -> dict:
+    resp = _session.post(
+        _url("/evidence/verify-package"),
+        files={"package_file": (filename, zip_bytes, "application/zip")},
+        timeout=60,
+    )
+    if not resp.ok:
+        try:
+            detail = resp.json().get("detail", resp.text)
+        except Exception:
+            detail = resp.text
+        raise Exception(f"Backend {resp.status_code}: {detail}")
+    return resp.json()
+
+
+def export_evidence(evidence_id: str, include_decryption: bool = False) -> bytes:
+    resp = _session.post(
+        _url(f"/evidence/{evidence_id}/export"),
+        json={"includeDecryption": include_decryption},
+        timeout=120,
+    )
     resp.raise_for_status()
     return resp.content
 
 
-def export_evidence_bulk(evidence_ids: list[str]) -> bytes:
+def export_evidence_bulk(evidence_ids: list[str], include_decryption: bool = False) -> bytes:
     resp = _session.post(
         _url("/evidence/export/bulk"),
-        json={"evidenceIds": evidence_ids},
+        json={"evidenceIds": evidence_ids, "includeDecryption": include_decryption},
         timeout=120,
     )
     resp.raise_for_status()

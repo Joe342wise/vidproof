@@ -9,6 +9,9 @@ services:
       - "127.0.0.1:8010:8000"
     volumes:
       - ./storage:/app/storage
+      - ./backend:/app/backend
+      - ./forensics:/app/forensics
+      - ./vidproof_crypto:/app/vidproof_crypto
     environment:
       - VIDPROOF_FABRIC_ADAPTER_URL=http://fabric-adapter:8081
     restart: unless-stopped
@@ -24,6 +27,11 @@ services:
         --server.headless true
     ports:
       - "127.0.0.1:8511:8501"
+    volumes:
+      - ./backend:/app/backend
+      - ./forensics:/app/forensics
+      - ./vidproof_crypto:/app/vidproof_crypto
+      - ./dashboard:/app/dashboard
     environment:
       - VIDPROOF_BACKEND_URL=http://backend:8000
     depends_on:

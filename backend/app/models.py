@@ -9,14 +9,15 @@ class EnrollCameraRequest(BaseModel):
     cameraId: str
     deviceSerial: str
     operatorId: str
-    ownerPublicKey: str  # base64 X25519 public key
+    ownerPublicKey: str           # base64 raw X25519 public key (32 bytes)
+    devicePublicKeyEd25519: str | None = None  # base64 raw Ed25519 public key (32 bytes); if omitted the server generates a keypair
 
 
 class EnrollCameraResponse(BaseModel):
     ok: bool
     cameraId: str
     cameraJsonPath: str
-    privateKeyPath: str
+    privateKeyPath: str | None    # None when the device supplied its own public key
     publicKeyEd25519: str
 
 
@@ -76,8 +77,13 @@ class IngestResponse(BaseModel):
     fabricTxId: str | None
 
 
+class ExportRequest(BaseModel):
+    includeDecryption: bool = False
+
+
 class BulkExportRequest(BaseModel):
     evidenceIds: list[str]
+    includeDecryption: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +93,7 @@ class BulkExportRequest(BaseModel):
 class VerifyEvidenceRequest(BaseModel):
     verifierId: str = "system"
     includeDecryption: bool = False
+    overridePublicKeyEd25519: str | None = None  # base64 raw Ed25519 key; overrides the enrolled camera record
 
 
 class VerificationResult(BaseModel):
@@ -94,6 +101,7 @@ class VerificationResult(BaseModel):
     evidenceId: str
     verifiedAt: str
     verifierId: str
+    publicKeySource: str = "enrolled"  # "enrolled" | "override"
     encryptedFileHashValid: bool
     deviceSignatureValid: bool
     decryptionAttempted: bool

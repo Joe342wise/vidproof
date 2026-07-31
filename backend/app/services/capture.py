@@ -7,7 +7,19 @@ from pathlib import Path
 from forensics.tsa_stamp import stamp_evidence_hash
 
 from backend.app.config import settings
+from backend.app.services import fabric_client
 from forensics.capture import run_capture
+
+
+def _patch_fabric_tx(evidence_path: Path, tx_id: str) -> None:
+    """Write fabricTxId into a read-only evidence file, then re-lock it."""
+    try:
+        os.chmod(evidence_path, 0o644)
+        data = json.loads(evidence_path.read_text())
+        data["fabricTxId"] = tx_id
+        evidence_path.write_text(json.dumps(data, indent=2))
+    finally:
+        os.chmod(evidence_path, 0o444)
 
 
 async def save_upload(file_obj, dest_dir: Path) -> Path:
@@ -45,7 +57,7 @@ def capture_evidence(
 
     eid = evidence_id or ("ev-" + secrets.token_hex(8))
 
-    return run_capture(
+    record = run_capture(
         video_path=video_path,
         camera_json_path=camera_json_path,
         privkey_path=privkey_path,
@@ -53,6 +65,13 @@ def capture_evidence(
         storage_dir=settings.storage_dir,
         tsa_url=settings.tsa_url,
     )
+
+    tx_id = fabric_client.register_evidence(eid, record)
+    if tx_id:
+        record["fabricTxId"] = tx_id
+        _patch_fabric_tx(settings.evidence_meta_dir / f"{eid}.json", tx_id)
+
+    return record
 
 
 def list_evidence() -> list[dict]:
@@ -132,7 +151,6 @@ def ingest_device_evidence(evidence_json_str: str, enc_bytes: bytes) -> dict:
 
     evidence.setdefault("objectUri", str(enc_path))
     evidence.setdefault("prnuCaptureScore", 0.0)
-    evidence.setdefault("fabricTxId", "")
 
     tsa_result = stamp_evidence_hash(
         evidence["encryptedFileHash"],
@@ -145,6 +163,9 @@ def ingest_device_evidence(evidence_json_str: str, enc_bytes: bytes) -> dict:
     else:
         evidence.setdefault("tsaTokenRef", "")
         evidence.setdefault("tsaTokenHash", "")
+
+    tx_id = fabric_client.register_evidence(eid, evidence)
+    evidence["fabricTxId"] = tx_id or ""
 
     evidence_path.write_text(json.dumps(evidence, indent=2))
     os.chmod(evidence_path, 0o444)

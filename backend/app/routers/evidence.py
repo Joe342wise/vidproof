@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import tempfile
@@ -15,6 +16,7 @@ from backend.app.models import (
     BulkExportRequest,
     CaptureResponse,
     EvidenceRecord,
+    ExportRequest,
     IngestResponse,
     VerificationResult,
     VerifyEvidenceRequest,
@@ -80,13 +82,11 @@ async def ingest_evidence(
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Storage error: {exc}")
 
-    fabric_tx = fabric_client.register_evidence(record["evidenceId"], record)
-
     return IngestResponse(
         ok=True,
         evidenceId=record["evidenceId"],
         encryptedFileHash=record["encryptedFileHash"],
-        fabricTxId=fabric_tx,
+        fabricTxId=record.get("fabricTxId") or None,
     )
 
 
@@ -101,6 +101,13 @@ def export_evidence_bulk(body: BulkExportRequest):
 
     if not body.evidenceIds:
         raise HTTPException(status_code=400, detail="evidenceIds must not be empty")
+
+    owner_privkey_path = None
+    if body.includeDecryption:
+        candidate = settings.keys_dir / "owner.x25519.priv.pem"
+        if not candidate.exists():
+            raise HTTPException(status_code=400, detail="Owner private key not found on server — cannot decrypt")
+        owner_privkey_path = candidate
 
     now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     master_manifest: dict = {"exportedAt": now_ts, "blocks": {}}
@@ -119,6 +126,7 @@ def export_evidence_bulk(body: BulkExportRequest):
                         out_dir=block_dir,
                         storage_dir=settings.storage_dir,
                         fabric_adapter_url=settings.fabric_adapter_url,
+                        owner_privkey_path=owner_privkey_path,
                     )
                 except ValueError as exc:
                     raise HTTPException(status_code=404, detail=str(exc))
@@ -132,6 +140,7 @@ def export_evidence_bulk(body: BulkExportRequest):
                     "tsaTokenIncluded": result["tsaTokenIncluded"],
                     "fabricHistoryIncluded": result["fabricHistoryIncluded"],
                     "verificationResultsIncluded": result["verificationResultsIncluded"],
+                    "videoIncluded": result.get("videoIncluded", False),
                 }
 
                 fabric_client.log_export(
@@ -167,6 +176,131 @@ def list_evidence():
     return capture_svc.list_evidence()
 
 
+@router.post("/verify-package")
+async def verify_package(package_file: UploadFile = File(...)):
+    """Verify an exported zip package and report any tampering.
+
+    Accepts both single-block and bulk export packages.  For each block the
+    response includes:
+      - manifestIntegrity: per-file hash comparison against the package MANIFEST
+      - verification: the standard hash + signature result run against the
+        uploaded files (not the server copy), using the camera key from the
+        package's own camera.json
+    """
+    from forensics.verify import run_verify
+
+    zip_bytes = await package_file.read()
+
+    with tempfile.TemporaryDirectory() as tmp_root:
+        tmp = Path(tmp_root)
+        zip_path = tmp / "upload.zip"
+        zip_path.write_bytes(zip_bytes)
+
+        try:
+            zf = zipfile.ZipFile(zip_path, "r")
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="Uploaded file is not a valid zip archive")
+
+        names = set(zf.namelist())
+
+        try:
+            master_manifest = json.loads(zf.read("MANIFEST.json"))
+        except KeyError:
+            raise HTTPException(status_code=400, detail="Package is missing MANIFEST.json")
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="MANIFEST.json is not valid JSON")
+
+        is_bulk = "blocks" in master_manifest
+        block_ids: list[str] = (
+            list(master_manifest["blocks"].keys()) if is_bulk
+            else [master_manifest.get("evidenceId", "")]
+        )
+
+        blocks_out = []
+
+        for eid in block_ids:
+            pfx = f"blocks/{eid}/" if is_bulk else ""
+
+            # --- manifest integrity ---
+            try:
+                block_manifest = json.loads(zf.read(f"{pfx}MANIFEST.json"))
+            except (KeyError, json.JSONDecodeError):
+                blocks_out.append({"evidenceId": eid, "_error": "Block MANIFEST.json missing or invalid"})
+                continue
+
+            file_results: dict[str, str] = {}
+            tampered: list[str] = []
+            for rel_path, expected_hash in block_manifest.get("files", {}).items():
+                full_name = f"{pfx}{rel_path}"
+                if full_name not in names:
+                    file_results[rel_path] = "MISSING"
+                    tampered.append(rel_path)
+                else:
+                    actual = hashlib.sha256(zf.read(full_name)).hexdigest()
+                    if actual == expected_hash:
+                        file_results[rel_path] = "OK"
+                    else:
+                        file_results[rel_path] = "TAMPERED"
+                        tampered.append(rel_path)
+
+            # --- extract files for verification ---
+            block_tmp = tmp / eid
+            block_tmp.mkdir(exist_ok=True)
+
+            enc_name      = f"{pfx}evidence/{eid}.enc"
+            evidence_name = f"{pfx}metadata/evidence.json"
+            camera_name   = f"{pfx}metadata/camera.json"
+
+            missing = [n for n in (enc_name, evidence_name, camera_name) if n not in names]
+            if missing:
+                blocks_out.append({
+                    "evidenceId": eid,
+                    "manifestIntegrity": {"ok": not tampered, "fileResults": file_results, "tamperedFiles": tampered},
+                    "_error": f"Required file(s) missing from package: {missing}",
+                })
+                continue
+
+            enc_path      = block_tmp / f"{eid}.enc"
+            evidence_path = block_tmp / "evidence.json"
+            camera_path   = block_tmp / "camera.json"
+
+            enc_path.write_bytes(zf.read(enc_name))
+            evidence_path.write_bytes(zf.read(evidence_name))
+            camera_path.write_bytes(zf.read(camera_name))
+
+            try:
+                verify_result = run_verify(
+                    evidence_id=eid,
+                    camera_json_path=camera_path,
+                    storage_dir=block_tmp,
+                    enc_path_override=enc_path,
+                    evidence_json_override=evidence_path,
+                    verifier_id="package-verify",
+                    dry_run=True,
+                )
+            except Exception as exc:
+                verify_result = {"_error": str(exc)}
+
+            blocks_out.append({
+                "evidenceId": eid,
+                "manifestIntegrity": {
+                    "ok": len(tampered) == 0,
+                    "fileResults": file_results,
+                    "tamperedFiles": tampered,
+                },
+                "verification": verify_result,
+            })
+
+        zf.close()
+
+    return {
+        "ok": True,
+        "packageType": "bulk" if is_bulk else "single",
+        "blockCount": len(block_ids),
+        "blocks": blocks_out,
+    }
+
+
 @router.post("/{evidence_id}/verify", response_model=VerifyEvidenceResponse)
 def verify_evidence(evidence_id: str, req: VerifyEvidenceRequest):
     try:
@@ -174,6 +308,7 @@ def verify_evidence(evidence_id: str, req: VerifyEvidenceRequest):
             evidence_id=evidence_id,
             verifier_id=req.verifierId,
             include_decryption=req.includeDecryption,
+            override_public_key_b64=req.overridePublicKeyEd25519,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -215,8 +350,15 @@ def get_fabric_history(evidence_id: str):
 
 
 @router.post("/{evidence_id}/export")
-def export_evidence_package(evidence_id: str):
+def export_evidence_package(evidence_id: str, body: ExportRequest = ExportRequest()):
     from forensics.export_package import build_package
+
+    owner_privkey_path = None
+    if body.includeDecryption:
+        candidate = settings.keys_dir / "owner.x25519.priv.pem"
+        if not candidate.exists():
+            raise HTTPException(status_code=400, detail="Owner private key not found on server — cannot decrypt")
+        owner_privkey_path = candidate
 
     with tempfile.TemporaryDirectory() as tmp:
         try:
@@ -225,6 +367,7 @@ def export_evidence_package(evidence_id: str):
                 out_dir=Path(tmp),
                 storage_dir=settings.storage_dir,
                 fabric_adapter_url=settings.fabric_adapter_url,
+                owner_privkey_path=owner_privkey_path,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

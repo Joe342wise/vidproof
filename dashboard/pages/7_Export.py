@@ -29,6 +29,7 @@ for key, default in [
     ("export_verify_results", {}),
     ("export_include", {}),
     ("export_zip_bytes", b""),
+    ("export_include_decryption", False),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -92,6 +93,12 @@ if st.session_state.export_stage == "select":
         icon="ℹ️",
     )
 
+    include_decryption = st.checkbox(
+        "Include decrypted video in package",
+        value=False,
+        help="Decrypts the footage using the owner key stored on the server and adds it to the zip as a viewable video file. Requires owner.x25519.priv.pem on the server.",
+    )
+
     if st.button("Verify & Export", type="primary", disabled=n == 0):
         verify_results: dict[str, dict] = {}
         progress = st.progress(0, text="Starting verification…")
@@ -99,7 +106,7 @@ if st.session_state.export_stage == "select":
             progress.progress((i) / n, text=f"Verifying {eid} ({i + 1}/{n})…")
             try:
                 resp = api_client.verify_evidence(
-                    eid, verifier_id="export-operator", include_decryption=True
+                    eid, verifier_id="export-operator", include_decryption=False
                 )
                 verify_results[eid] = resp.get("result", {}) if resp.get("ok") else {
                     "_error": resp.get("detail", "Verification failed")
@@ -111,6 +118,7 @@ if st.session_state.export_stage == "select":
         st.session_state.export_selected_ids = selected
         st.session_state.export_verify_results = verify_results
         st.session_state.export_include = {eid: True for eid in selected}
+        st.session_state.export_include_decryption = include_decryption
 
         # If everything passed, skip results screen and package immediately
         all_passed = bool(selected) and all(
@@ -120,7 +128,7 @@ if st.session_state.export_stage == "select":
         if all_passed:
             with st.spinner(f"All {n} block(s) verified — building package…"):
                 try:
-                    zip_bytes = api_client.export_evidence_bulk(selected)
+                    zip_bytes = api_client.export_evidence_bulk(selected, include_decryption=include_decryption)
                 except Exception as exc:
                     st.error(f"Export failed: {exc}")
                     st.stop()
@@ -231,7 +239,10 @@ elif st.session_state.export_stage == "results":
         if st.button("Generate Package", type="primary", disabled=len(included) == 0):
             with st.spinner(f"Building package for {len(included)} block(s)…"):
                 try:
-                    zip_bytes = api_client.export_evidence_bulk(included)
+                    zip_bytes = api_client.export_evidence_bulk(
+                        included,
+                        include_decryption=st.session_state.get("export_include_decryption", False),
+                    )
                 except Exception as exc:
                     st.error(f"Export failed: {exc}")
                     st.stop()
@@ -271,8 +282,10 @@ elif st.session_state.export_stage == "done":
     st.divider()
     st.subheader("Package Structure")
 
+    dec = st.session_state.get("export_include_decryption", False)
     rows = "\n".join(
-        f"| `blocks/{eid}/` | Evidence block, metadata, verification results, TSA token, Fabric history |"
+        f"| `blocks/{eid}/` | Evidence block, metadata, verification results, TSA token, Fabric history"
+        + (", **decrypted video**" if dec else "") + " |"
         for eid in included
     )
     st.markdown(f"""

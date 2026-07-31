@@ -96,6 +96,7 @@ def verify_evidence(
     evidence_id: str,
     verifier_id: str = "system",
     include_decryption: bool = False,
+    override_public_key_b64: str | None = None,
 ) -> dict:
     """Run the verification pipeline for a given evidence item.
 
@@ -127,6 +128,17 @@ def verify_evidence(
     tsa_ca = settings.tsa_ca_cert if settings.tsa_ca_cert.exists() else None
     tsa_crt = settings.tsa_cert if settings.tsa_cert.exists() else None
 
+    if override_public_key_b64 is not None:
+        import base64
+        try:
+            key_bytes = base64.b64decode(override_public_key_b64, validate=True)
+        except Exception as exc:
+            raise ValueError(f"overridePublicKeyEd25519 is not valid base64: {exc}") from exc
+        if len(key_bytes) != 32:
+            raise ValueError(
+                f"overridePublicKeyEd25519 must be a 32-byte Ed25519 key (got {len(key_bytes)} bytes)"
+            )
+
     result = run_verify(
         evidence_id=evidence_id,
         camera_json_path=camera_json_path,
@@ -135,6 +147,7 @@ def verify_evidence(
         verifier_id=verifier_id,
         tsa_ca_cert=tsa_ca,
         tsa_cert=tsa_crt,
+        override_public_key_b64=override_public_key_b64,
     )
 
     fabric_client.log_verification(result["verificationId"], result)

@@ -43,7 +43,7 @@ if load and evidence_id:
             return f"color: {color}; font-weight: bold"
 
         if "primaryDecision" in df_display.columns:
-            styled = df_display.style.applymap(_color_decision, subset=["primaryDecision"])
+            styled = df_display.style.map(_color_decision, subset=["primaryDecision"])
             st.dataframe(styled, use_container_width=True, hide_index=True)
         else:
             st.dataframe(df_display, use_container_width=True, hide_index=True)

@@ -27,6 +27,7 @@ import argparse
 import datetime as _dt
 import hashlib
 import json
+import sys
 import zipfile
 from pathlib import Path
 
@@ -52,11 +53,22 @@ def _try_get_fabric_history(adapter_url: str, evidence_id: str) -> list | None:
     return None
 
 
+def _detect_video_ext(data: bytes) -> str:
+    if len(data) >= 12 and data[4:8] in (b"ftyp", b"mdat", b"moov", b"free"):
+        return ".mp4"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"AVI ":
+        return ".avi"
+    if len(data) >= 4 and data[:3] in (b"\x00\x00\x01", b"\x1a\x45\xdf\xa3"):
+        return ".mkv"
+    return ".mp4"
+
+
 def build_package(
     evidence_id: str,
     out_dir: Path,
     storage_dir: Path = Path("storage"),
     fabric_adapter_url: str = "http://localhost:8081",
+    owner_privkey_path: Path | None = None,
 ) -> dict:
     """Build a forensic zip package.
 
@@ -107,18 +119,48 @@ def build_package(
     evidence_bytes = evidence_path.read_bytes()
     camera_bytes = camera_path.read_bytes()
 
+    plaintext_bytes: bytes | None = None
+    plaintext_ext = ".mp4"
+    if owner_privkey_path is not None:
+        try:
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from forensics.crypto_core import decrypt_aes_gcm, unwrap_aes_key
+            aes_key = unwrap_aes_key(evidence["wrappedKey"], owner_privkey_path)
+            plaintext_bytes = decrypt_aes_gcm(
+                enc_path,
+                evidence["nonce"],
+                evidence["authTag"],
+                aes_key,
+            )
+            plaintext_ext = _detect_video_ext(plaintext_bytes)
+        except Exception:
+            plaintext_bytes = None
+
     verify_instructions = _build_verify_instructions(
         eid=eid,
         evidence=evidence,
         has_tsr=tsr_bytes is not None,
     )
 
+    now = _dt.datetime.now(_dt.timezone.utc)
+    _ts = (now.year, now.month, now.day, now.hour, now.minute, now.second)
+
+    def _zip_entry(arcname: str, mode: int = 0o444) -> zipfile.ZipInfo:
+        info = zipfile.ZipInfo(arcname, date_time=_ts)
+        info.compress_type = zipfile.ZIP_DEFLATED
+        # Upper 16 bits: Unix permissions (Linux/macOS)
+        # Lower 16 bits: MS-DOS attributes — 0x01 = read-only (Windows)
+        info.external_attr = (mode << 16) | 0x01
+        return info
+
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        def add(arcname: str, data: bytes) -> None:
-            zf.writestr(arcname, data)
+        def add(arcname: str, data: bytes, mode: int = 0o444) -> None:
+            zf.writestr(_zip_entry(arcname, mode), data)
             manifest[arcname] = sha256_bytes(data)
 
         add(f"evidence/{eid}.enc", enc_bytes)
+        if plaintext_bytes is not None:
+            add(f"video/{eid}{plaintext_ext}", plaintext_bytes)
         add("metadata/evidence.json", evidence_bytes)
         add("metadata/camera.json", camera_bytes)
 
@@ -142,7 +184,7 @@ def build_package(
             "files": manifest,
         }
         manifest_bytes = json.dumps(manifest_payload, indent=2).encode()
-        zf.writestr("MANIFEST.json", manifest_bytes)
+        zf.writestr(_zip_entry("MANIFEST.json"), manifest_bytes)
 
     manifest_hash = sha256_bytes(zip_path.read_bytes())
 
@@ -153,6 +195,7 @@ def build_package(
         "tsaTokenIncluded": tsr_bytes is not None,
         "fabricHistoryIncluded": fabric_history is not None,
         "verificationResultsIncluded": len(ver_records),
+        "videoIncluded": plaintext_bytes is not None,
     }
 
 

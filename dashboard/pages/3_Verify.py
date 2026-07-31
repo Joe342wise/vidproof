@@ -102,6 +102,19 @@ with col_btn:
         use_container_width=True,
     )
 
+with st.expander("Advanced — override camera public key"):
+    st.caption(
+        "By default, verification uses the Ed25519 public key stored in the enrolled camera record. "
+        "Paste a different key here to verify against a known-good key instead — "
+        "for example, one obtained directly from the device QR code or out-of-band. "
+        "Applies to all selected blocks."
+    )
+    override_public_key = st.text_input(
+        "Camera Ed25519 public key (base64, 32 bytes)",
+        placeholder="Leave blank to use the enrolled key",
+        label_visibility="visible",
+    ).strip() or None
+
 if n == 0 and not run:
     st.caption("Select at least one block to verify.")
     st.stop()
@@ -125,6 +138,7 @@ for i, eid in enumerate(selected_ids):
             evidence_id=eid,
             verifier_id=verifier_id.strip() or "operator",
             include_decryption=include_decryption,
+            override_public_key=override_public_key,
         )
         results[eid] = resp.get("result", {}) if resp.get("ok") else {"_error": resp.get("detail", "failed")}
     except Exception as exc:
@@ -199,8 +213,11 @@ for eid in selected_ids:
             with st.expander("Timestamp detail"):
                 st.code(r["tsaDetail"])
 
+        key_source = r.get("publicKeySource", "enrolled")
+        key_label = "🔑 Key: **override** (user-supplied)" if key_source == "override" else "🔑 Key: enrolled camera record"
         st.caption(
             f"Verification ID: `{r.get('verificationId','—')}` · "
             f"Verified at: `{r.get('verifiedAt','—')}` · "
-            f"Verifier: `{r.get('verifierId','—')}`"
+            f"Verifier: `{r.get('verifierId','—')}` · "
+            + key_label
         )

@@ -63,6 +63,16 @@ def delete_camera(camera_id: str) -> None:
     resp.raise_for_status()
 
 
+def upload_prnu_reference(camera_id: str, video_bytes: bytes, filename: str) -> dict:
+    resp = _session.post(
+        _url(f"/camera/{camera_id}/prnu-reference"),
+        files={"video_file": (filename, video_bytes, "application/octet-stream")},
+        timeout=120,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 # ---------------------------------------------------------------------------
 # Evidence
 # ---------------------------------------------------------------------------

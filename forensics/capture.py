@@ -90,6 +90,18 @@ def run_capture(
             tsa_token_ref = tsa_result["tsrPath"]
             tsa_token_hash = tsa_result["tsaTokenHash"]
 
+    # PRNU comparison — non-fatal, runs while plaintext video is still on disk
+    prnu_capture_score: float | None = None
+    prnu_ref_path = storage_dir / "prnu" / f"{camera['cameraId']}_reference.npy"
+    if prnu_ref_path.exists():
+        try:
+            from forensics.prnu_core import compare_prnu, extract_prnu, load_reference
+            query_prnu, _ = extract_prnu(video_path)
+            ref_prnu = load_reference(prnu_ref_path)
+            prnu_capture_score = compare_prnu(ref_prnu, query_prnu)
+        except Exception:
+            pass
+
     record = {
         "evidenceId": evidence_id,
         "cameraId": camera["cameraId"],
@@ -102,7 +114,7 @@ def run_capture(
         "wrappedKey": wrapped_key,
         "captureTimestamp": capture_timestamp,
         "deviceSignature": device_signature,
-        "prnuCaptureScore": 0.0,
+        "prnuCaptureScore": prnu_capture_score,
         "tsaTokenRef": tsa_token_ref,
         "tsaTokenHash": tsa_token_hash,
         "fabricTxId": "",

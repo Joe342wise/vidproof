@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from backend.app.models import (
@@ -56,6 +56,28 @@ def get_camera(camera_id: str):
     if record is None:
         raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
     return record
+
+
+@router.post("/{camera_id}/prnu-reference")
+async def upload_prnu_reference(camera_id: str, video_file: UploadFile = File(...)):
+    """Extract a PRNU fingerprint from the uploaded reference video and store it.
+
+    The reference should be 30–60 seconds of flat, evenly-lit footage from the
+    enrolled camera.  At least 30 frames are needed for a reliable fingerprint.
+    """
+    record = enrollment_svc.get_camera(camera_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
+
+    video_bytes = await video_file.read()
+    try:
+        result = enrollment_svc.extract_and_save_prnu_reference(camera_id, video_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"PRNU extraction failed: {exc}")
+
+    return {"ok": True, "cameraId": camera_id, "prnuReferenceHash": result["prnuReferenceHash"], "framesUsed": result["framesUsed"]}
 
 
 @router.delete("/{camera_id}", status_code=204)

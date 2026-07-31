@@ -347,6 +347,49 @@ for row_start in range(0, len(cameras), COLS_PER_ROW):
                 else:
                     st.warning("Public key not available in camera record.")
 
+            with st.expander("PRNU fingerprint reference"):
+                cam_id = cam["cameraId"]
+                prnu_hash = cam.get("prnuReferenceHash", "")
+                if prnu_hash:
+                    st.success(
+                        f"Reference set — SHA-256 `{prnu_hash[:16]}…`",
+                        icon="🔬",
+                    )
+                    st.caption(
+                        "Upload a new reference video below to replace the current fingerprint."
+                    )
+                else:
+                    st.info(
+                        "No PRNU reference stored yet. Upload 30–60 s of flat, "
+                        "evenly-lit footage from this camera to enable sensor fingerprinting.",
+                        icon="🔬",
+                    )
+                prnu_file = st.file_uploader(
+                    "Reference video",
+                    type=["mp4", "mkv", "avi", "h264"],
+                    key=f"prnu_upload_{cam_id}",
+                    label_visibility="collapsed",
+                )
+                if prnu_file is not None:
+                    if st.button(
+                        "Extract & save fingerprint",
+                        key=f"prnu_btn_{cam_id}",
+                        type="primary",
+                    ):
+                        with st.spinner("Extracting PRNU fingerprint — this may take a minute…"):
+                            try:
+                                result = api_client.upload_prnu_reference(
+                                    cam_id, prnu_file.read(), prnu_file.name
+                                )
+                                st.success(
+                                    f"Fingerprint saved — {result.get('framesUsed', '?')} frames used. "
+                                    f"SHA-256 `{result.get('prnuReferenceHash','')[:16]}…`"
+                                )
+                                st.cache_data.clear()
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Upload failed: {exc}")
+
             with st.expander("Remove camera"):
                 cam_id = cam["cameraId"]
                 confirmed = st.checkbox(

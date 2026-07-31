@@ -71,6 +71,33 @@ def enroll_camera(
     return record
 
 
+def extract_and_save_prnu_reference(camera_id: str, video_bytes: bytes) -> dict:
+    """Extract PRNU fingerprint from video bytes, persist it, and update camera.json.
+
+    Raises ValueError if the camera is unknown or too few frames were extracted.
+    """
+    camera_path = settings.cameras_dir / f"{camera_id}.json"
+    if not camera_path.exists():
+        raise ValueError(f"Camera '{camera_id}' not found")
+
+    from forensics.prnu_core import extract_prnu_from_bytes, save_reference
+
+    prnu, frames_used = extract_prnu_from_bytes(video_bytes)
+    if frames_used < 10:
+        raise ValueError(
+            f"Only {frames_used} frame(s) extracted — at least 10 are needed for a reliable fingerprint"
+        )
+
+    ref_path = settings.storage_dir / "prnu" / f"{camera_id}_reference.npy"
+    prnu_hash = save_reference(prnu, ref_path)
+
+    camera = json.loads(camera_path.read_text())
+    camera["prnuReferenceHash"] = prnu_hash
+    camera_path.write_text(json.dumps(camera, indent=2))
+
+    return {"prnuReferenceHash": prnu_hash, "framesUsed": frames_used}
+
+
 def get_owner_public_key() -> str | None:
     """Return the server's owner X25519 public key as base64, or None if not set up."""
     priv_path = settings.keys_dir / "owner.x25519.priv.pem"

@@ -12,8 +12,10 @@ services:
       - ./backend:/app/backend
       - ./forensics:/app/forensics
       - ./vidproof_crypto:/app/vidproof_crypto
+      - ./infra/tsa:/app/infra/tsa:ro
     environment:
       - VIDPROOF_FABRIC_ADAPTER_URL=http://fabric-adapter:8081
+      - VIDPROOF_TSA_URL=http://tsa:2560
     restart: unless-stopped
 
   dashboard:

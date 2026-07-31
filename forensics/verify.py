@@ -93,20 +93,21 @@ def run_verify(
     decryption_valid = False
     decrypted_plaintext_hash: str | None = None
     plaintext_hash_matches_evidence = False
+    _plaintext: bytes | None = None
     notes_parts = []
 
     if owner_privkey_path is not None:
         decryption_attempted = True
         try:
             aes_key = unwrap_aes_key(evidence["wrappedKey"], owner_privkey_path)
-            plaintext = decrypt_aes_gcm(
+            _plaintext = decrypt_aes_gcm(
                 enc_path=enc_path,
                 nonce_b64=evidence["nonce"],
                 auth_tag_b64=evidence["authTag"],
                 aes_key=aes_key,
             )
             decryption_valid = True
-            decrypted_plaintext_hash = sha256_bytes(plaintext)
+            decrypted_plaintext_hash = sha256_bytes(_plaintext)
             plaintext_hash_matches_evidence = (
                 decrypted_plaintext_hash == evidence["plaintextHash"]
             )
@@ -122,7 +123,27 @@ def run_verify(
             decryption_valid = False
             notes_parts.append(f"Decryption I/O error: {exc}")
 
-    # Step 4: RFC 3161 timestamp verification (optional — skipped if no token or no certs)
+    # Step 4: PRNU fingerprint comparison (optional — requires decryption + stored reference)
+    prnu_checked = False
+    prnu_score: float | None = None
+
+    if _plaintext is not None:
+        prnu_ref_path = storage_dir / "prnu" / f"{camera['cameraId']}_reference.npy"
+        if prnu_ref_path.exists():
+            try:
+                from forensics.prnu_core import compare_prnu, extract_prnu_from_bytes, load_reference
+                query_prnu, _ = extract_prnu_from_bytes(_plaintext)
+                ref_prnu = load_reference(prnu_ref_path)
+                prnu_score = compare_prnu(ref_prnu, query_prnu)
+                prnu_checked = True
+                if prnu_score < 0.3:
+                    notes_parts.append(
+                        f"PRNU score {prnu_score:.3f} is below threshold — footage may not originate from this camera."
+                    )
+            except Exception as exc:
+                notes_parts.append(f"PRNU comparison failed: {exc}")
+
+    # Step 5: RFC 3161 timestamp verification (optional — skipped if no token or no certs)
     tsa_checked = False
     tsa_valid: bool | None = None
     tsa_detail: str | None = None
@@ -186,8 +207,8 @@ def run_verify(
         "decryptionValid": decryption_valid,
         "decryptedPlaintextHash": decrypted_plaintext_hash,
         "plaintextHashMatchesEvidence": plaintext_hash_matches_evidence,
-        "prnuChecked": False,
-        "prnuScore": None,
+        "prnuChecked": prnu_checked,
+        "prnuScore": prnu_score,
         "tsaChecked": tsa_checked,
         "tsaValid": tsa_valid,
         "tsaDetail": tsa_detail,

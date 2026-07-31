@@ -203,45 +203,78 @@ async def verify_package(package_file: UploadFile = File(...)):
 
         names = set(zf.namelist())
 
-        try:
-            master_manifest = json.loads(zf.read("MANIFEST.json"))
-        except KeyError:
-            raise HTTPException(status_code=400, detail="Package is missing MANIFEST.json")
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="MANIFEST.json is not valid JSON")
+        # MANIFEST.json is optional for legacy packages — we fall back to
+        # crypto-only verification when it is absent.
+        master_manifest: dict | None = None
+        if "MANIFEST.json" in names:
+            try:
+                master_manifest = json.loads(zf.read("MANIFEST.json"))
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="MANIFEST.json is not valid JSON")
 
-        is_bulk = "blocks" in master_manifest
-        block_ids: list[str] = (
-            list(master_manifest["blocks"].keys()) if is_bulk
-            else [master_manifest.get("evidenceId", "")]
-        )
+        # Determine package type and block IDs.
+        if master_manifest is not None and "blocks" in master_manifest:
+            is_bulk = True
+            block_ids: list[str] = list(master_manifest["blocks"].keys())
+        elif master_manifest is not None and "evidenceId" in master_manifest:
+            is_bulk = False
+            block_ids = [master_manifest["evidenceId"]]
+        else:
+            # Legacy package with no MANIFEST.json — scan for evidence.json files.
+            # Single-block: metadata/evidence.json; bulk: blocks/*/metadata/evidence.json
+            if "metadata/evidence.json" in names:
+                is_bulk = False
+                try:
+                    ev = json.loads(zf.read("metadata/evidence.json"))
+                    block_ids = [ev["evidenceId"]]
+                except (KeyError, json.JSONDecodeError):
+                    raise HTTPException(status_code=400, detail="Cannot read evidenceId from metadata/evidence.json")
+            else:
+                bulk_ev = [n for n in names if n.startswith("blocks/") and n.endswith("/metadata/evidence.json")]
+                if bulk_ev:
+                    is_bulk = True
+                    block_ids = []
+                    for ev_path in bulk_ev:
+                        try:
+                            ev = json.loads(zf.read(ev_path))
+                            block_ids.append(ev["evidenceId"])
+                        except (KeyError, json.JSONDecodeError):
+                            pass
+                    if not block_ids:
+                        raise HTTPException(status_code=400, detail="Could not determine evidence IDs from package")
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Package structure unrecognised — expected MANIFEST.json or metadata/evidence.json",
+                    )
 
         blocks_out = []
 
         for eid in block_ids:
             pfx = f"blocks/{eid}/" if is_bulk else ""
 
-            # --- manifest integrity ---
-            try:
-                block_manifest = json.loads(zf.read(f"{pfx}MANIFEST.json"))
-            except (KeyError, json.JSONDecodeError):
-                blocks_out.append({"evidenceId": eid, "_error": "Block MANIFEST.json missing or invalid"})
-                continue
-
+            # --- manifest integrity (optional — skipped if no block MANIFEST) ---
             file_results: dict[str, str] = {}
             tampered: list[str] = []
-            for rel_path, expected_hash in block_manifest.get("files", {}).items():
-                full_name = f"{pfx}{rel_path}"
-                if full_name not in names:
-                    file_results[rel_path] = "MISSING"
-                    tampered.append(rel_path)
-                else:
-                    actual = hashlib.sha256(zf.read(full_name)).hexdigest()
-                    if actual == expected_hash:
-                        file_results[rel_path] = "OK"
-                    else:
-                        file_results[rel_path] = "TAMPERED"
-                        tampered.append(rel_path)
+            manifest_available = False
+
+            block_manifest_name = f"{pfx}MANIFEST.json"
+            if block_manifest_name in names:
+                try:
+                    block_manifest = json.loads(zf.read(block_manifest_name))
+                    manifest_available = True
+                    for rel_path, expected_hash in block_manifest.get("files", {}).items():
+                        full_name = f"{pfx}{rel_path}"
+                        if full_name not in names:
+                            file_results[rel_path] = "MISSING"
+                            tampered.append(rel_path)
+                        else:
+                            actual = hashlib.sha256(zf.read(full_name)).hexdigest()
+                            file_results[rel_path] = "OK" if actual == expected_hash else "TAMPERED"
+                            if actual != expected_hash:
+                                tampered.append(rel_path)
+                except json.JSONDecodeError:
+                    pass  # treat as no manifest
 
             # --- extract files for verification ---
             block_tmp = tmp / eid
@@ -255,7 +288,12 @@ async def verify_package(package_file: UploadFile = File(...)):
             if missing:
                 blocks_out.append({
                     "evidenceId": eid,
-                    "manifestIntegrity": {"ok": not tampered, "fileResults": file_results, "tamperedFiles": tampered},
+                    "manifestIntegrity": {
+                        "ok": manifest_available and not tampered,
+                        "available": manifest_available,
+                        "fileResults": file_results,
+                        "tamperedFiles": tampered,
+                    },
                     "_error": f"Required file(s) missing from package: {missing}",
                 })
                 continue
@@ -284,7 +322,8 @@ async def verify_package(package_file: UploadFile = File(...)):
             blocks_out.append({
                 "evidenceId": eid,
                 "manifestIntegrity": {
-                    "ok": len(tampered) == 0,
+                    "ok": manifest_available and not tampered,
+                    "available": manifest_available,
                     "fileResults": file_results,
                     "tamperedFiles": tampered,
                 },

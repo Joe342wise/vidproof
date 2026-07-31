@@ -38,14 +38,15 @@ n_pass  = sum(1 for b in blocks if b.get("verification", {}).get("primaryDecisio
 n_fail  = sum(1 for b in blocks if b.get("verification", {}).get("primaryDecision") == "FAIL")
 n_err   = sum(1 for b in blocks if b.get("_error"))
 n_clean = sum(1 for b in blocks if b.get("manifestIntegrity", {}).get("ok"))
-n_tamp  = n_blocks - n_clean
+n_no_manifest = sum(1 for b in blocks if not b.get("manifestIntegrity", {}).get("available", True))
+n_tamp  = n_blocks - n_clean - n_no_manifest
 
 st.markdown(f"**Package type:** `{pkg_type}` · **{n_blocks} block(s)**")
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Verification PASS", n_pass)
 c2.metric("Verification FAIL", n_fail)
-c3.metric("Files clean",    n_clean)
+c3.metric("Files clean",    n_clean if not n_no_manifest else f"{n_clean} (manifest skipped: {n_no_manifest})")
 c4.metric("Files tampered", n_tamp, delta=f"-{n_tamp}" if n_tamp else None, delta_color="inverse")
 
 st.divider()
@@ -105,8 +106,14 @@ for block in blocks:
 
         # Manifest integrity table
         file_results = mi.get("fileResults", {})
-        if file_results:
-            st.markdown("**Manifest integrity**")
+        st.markdown("**Manifest integrity**")
+        if not mi.get("available", True):
+            st.warning(
+                "This package was exported without a MANIFEST.json (legacy format). "
+                "File hash checks are skipped — cryptographic verification still runs below.",
+                icon="⚠️",
+            )
+        elif file_results:
             def _file_row(path: str, status: str) -> str:
                 colour = _FILE_COLOUR.get(status, "#94a3b8")
                 icon   = _FILE_ICON.get(status, "?")
